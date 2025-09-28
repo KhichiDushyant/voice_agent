@@ -18,7 +18,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,*').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,*.replit.dev,*.replit.co,*.replit.app,*').split(',')
 
 # Application definition
 INSTALLED_APPS = [
@@ -123,9 +123,14 @@ REST_FRAMEWORK = {
     ],
 }
 
-# CORS settings
+# CORS settings - Updated for Replit
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "https://*.replit.dev",
+    "https://*.replit.co", 
+    "https://*.replit.app",
+]
 
 # Channels configuration
 # Redis configuration (commented out - using in-memory instead)
