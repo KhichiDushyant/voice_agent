@@ -120,10 +120,10 @@ function showView(viewName) {
 async function loadAllData() {
     try {
         const [patientsRes, nursesRes, appointmentsRes, callsRes] = await Promise.all([
-            fetchAPI('/patients/'),
-            fetchAPI('/nurses/'),
+            fetchAPI('/api/patients/'),
+            fetchAPI('/api/nurses/'),
             fetchAPI('/appointments/'),
-            fetchAPI('/calls/')
+            fetchAPI('/api/calls/')
         ]);
         
         currentData.patients = patientsRes.patients || patientsRes || [];
@@ -151,7 +151,7 @@ async function loadAllData() {
 // Load calls data separately for real-time updates
 async function loadCallsData() {
     try {
-        const callsRes = await fetchAPI('/calls/');
+        const callsRes = await fetchAPI('/api/calls/');
         currentData.calls = Array.isArray(callsRes) ? callsRes : (callsRes.calls || []);
         
         // Update calls display if currently viewing calls
@@ -1132,7 +1132,7 @@ async function handleAddPatient(event) {
             medical_conditions: formData.get('medical_conditions').split(',').map(c => c.trim()).filter(c => c)
         };
         
-        const result = await fetchAPI('/patients/', {
+        const result = await fetchAPI('/api/patients/', {
             method: 'POST',
             body: JSON.stringify(data)
         });
@@ -1165,7 +1165,7 @@ async function handleAddNurse(event) {
             license_number: formData.get('license_number')
         };
         
-        const result = await fetchAPI('/nurses/', {
+        const result = await fetchAPI('/api/nurses/', {
             method: 'POST',
             body: JSON.stringify(data)
         });
@@ -1301,7 +1301,7 @@ async function handleUpdatePatient(event, patientId) {
             medical_conditions: formData.get('medical_conditions').split(',').map(c => c.trim()).filter(c => c)
         };
         
-        const result = await fetchAPI(`/patients/${patientId}/`, {
+        const result = await fetchAPI(`/api/patients/${patientId}/`, {
             method: 'PUT',
             body: JSON.stringify(data)
         });
@@ -1334,7 +1334,7 @@ async function handleUpdateNurse(event, nurseId) {
             license_number: formData.get('license_number')
         };
         
-        const result = await fetchAPI(`/nurses/${nurseId}/`, {
+        const result = await fetchAPI(`/api/nurses/${nurseId}/`, {
             method: 'PUT',
             body: JSON.stringify(data)
         });
