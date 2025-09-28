@@ -7,7 +7,8 @@ from . import views
 
 urlpatterns = [
     # Health check and dashboard
-    path('', views.index_page, name='index'),
+    path('', views.dashboard, name='index'),
+    path('health/', views.index_page, name='health_check'),
     path('dashboard/', views.dashboard, name='dashboard'),
     
     # Testing
