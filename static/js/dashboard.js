@@ -122,7 +122,7 @@ async function loadAllData() {
         const [patientsRes, nursesRes, appointmentsRes, callsRes] = await Promise.all([
             fetchAPI('/api/patients/'),
             fetchAPI('/api/nurses/'),
-            fetchAPI('/appointments/'),
+            fetchAPI('/api/appointments/'),
             fetchAPI('/api/calls/')
         ]);
         
@@ -917,8 +917,12 @@ async function viewCallDetails(callId) {
         showLoading(true);
         const response = await fetchAPI(`/calls/${callId}/details/`);
         
-        const call = response.call;
-        const transcript = response.transcript;
+        if (!response || !response.call) {
+            throw new Error('Call details not found');
+        }
+        
+        const call = response.call || {};
+        const transcript = response.transcript || {};
         const conversation = response.conversation || [];
         
         const content = `
@@ -926,13 +930,13 @@ async function viewCallDetails(callId) {
                 <div class="row">
                     <div class="col-md-6">
                         <h5>Call Information</h5>
-                        <p><strong>Call ID:</strong> ${call.call_sid}</p>
+                        <p><strong>Call ID:</strong> ${call.call_sid || 'N/A'}</p>
                         <p><strong>Patient:</strong> ${call.patient_name || 'Unknown'}</p>
-                        <p><strong>Phone:</strong> ${call.patient_phone}</p>
-                        <p><strong>Direction:</strong> ${call.call_direction}</p>
-                        <p><strong>Status:</strong> <span class="badge ${call.call_status === 'completed' ? 'bg-success' : call.call_status === 'failed' ? 'bg-danger' : 'bg-warning'}">${call.call_status}</span></p>
+                        <p><strong>Phone:</strong> ${call.patient_phone || 'N/A'}</p>
+                        <p><strong>Direction:</strong> ${call.call_direction || 'N/A'}</p>
+                        <p><strong>Status:</strong> <span class="badge ${call.call_status === 'completed' ? 'bg-success' : call.call_status === 'failed' ? 'bg-danger' : 'bg-warning'}">${call.call_status || 'Unknown'}</span></p>
                         <p><strong>Duration:</strong> ${call.call_duration ? call.call_duration + ' seconds' : 'N/A'}</p>
-                        <p><strong>Start Time:</strong> ${formatDateTime(call.start_time)}</p>
+                        <p><strong>Start Time:</strong> ${call.start_time ? formatDateTime(call.start_time) : 'N/A'}</p>
                         ${call.end_time ? `<p><strong>End Time:</strong> ${formatDateTime(call.end_time)}</p>` : ''}
                     </div>
                     <div class="col-md-6">
@@ -1005,13 +1009,17 @@ async function viewCallTranscript(callId) {
         showLoading(true);
         const response = await fetchAPI(`/calls/${callId}/transcript/`);
         
-        const transcript = response.transcript;
+        if (!response || !response.transcript) {
+            throw new Error('Call transcript not found');
+        }
+        
+        const transcript = response.transcript || {};
         
         const content = `
             <div class="transcript-viewer">
                 <div class="transcript-header mb-3">
                     <p><strong>Call ID:</strong> ${callId}</p>
-                    <p><strong>Generated:</strong> ${formatDateTime(transcript.created_at)}</p>
+                    <p><strong>Generated:</strong> ${transcript.created_at ? formatDateTime(transcript.created_at) : 'N/A'}</p>
                 </div>
                 
                 ${transcript.full_transcript ? `
@@ -1203,7 +1211,7 @@ async function handleScheduleAppointment(event) {
             notes: formData.get('notes')
         };
         
-        const result = await fetchAPI('/appointments/', {
+        const result = await fetchAPI('/api/appointments/', {
             method: 'POST',
             body: JSON.stringify(data)
         });
@@ -1407,7 +1415,7 @@ async function handleUpdateAppointment(event, appointmentId) {
             notes: formData.get('notes')
         };
         
-        const result = await fetchAPI(`/appointments/${appointmentId}/update/`, {
+        const result = await fetchAPI(`/api/appointments/${appointmentId}/`, {
             method: 'PUT',
             body: JSON.stringify(data)
         });
@@ -1477,7 +1485,7 @@ async function handleAssignNurse(event, patientId) {
             notes: formData.get('notes')
         };
         
-        const result = await fetchAPI('/assign-nurse/', {
+        const result = await fetchAPI('/api/assign-nurse/', {
             method: 'POST',
             body: JSON.stringify(data)
         });
@@ -1548,7 +1556,7 @@ async function handleMakeTestCall(event) {
             return;
         }
         
-        const result = await fetchAPI('/make-test-call/', {
+        const result = await fetchAPI('/api/make-test-call/', {
             method: 'POST',
             body: JSON.stringify({ patient_id: patientId })
         });
