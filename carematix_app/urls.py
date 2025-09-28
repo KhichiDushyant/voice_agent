@@ -43,14 +43,17 @@ urlpatterns = [
     # Testing endpoint for transcripts
     path('test-transcripts/', views.test_transcripts_page, name='test_transcripts'),
     
-    # Dashboard API endpoints
-    path('patients/', views.get_all_patients, name='all_patients'),
-    path('patients/', views.add_patient, name='add_patient'),
-    path('nurses/', views.get_all_nurses, name='all_nurses'),
-    path('nurses/', views.add_nurse, name='add_nurse'),
-    path('calls/', views.get_all_calls, name='all_calls'),
-    path('assign-nurse/', views.assign_nurse_to_patient, name='assign_nurse'),
-    path('patients/<int:patient_id>/nurses/', views.get_patient_nurses, name='patient_nurses'),
-    path('assign-nurse/<int:assignment_id>/', views.remove_nurse_assignment, name='remove_assignment'),
+    # Dashboard API endpoints - RESTful design
+    path('api/patients/', views.patients_api, name='patients_api'),
+    path('api/patients/<int:patient_id>/', views.patient_detail_api, name='patient_detail_api'),
+    path('api/nurses/', views.nurses_api, name='nurses_api'),
+    path('api/nurses/<int:nurse_id>/', views.nurse_detail_api, name='nurse_detail_api'),
+    path('api/appointments/', views.appointments_api, name='appointments_api'),
+    path('api/appointments/<int:appointment_id>/', views.appointment_detail_api, name='appointment_detail_api'),
+    path('api/calls/', views.get_all_calls, name='all_calls'),
+    path('api/make-test-call/', views.make_test_call, name='make_test_call'),
+    path('api/assign-nurse/', views.assign_nurse_to_patient, name='assign_nurse'),
+    path('api/patients/<int:patient_id>/nurses/', views.get_patient_nurses, name='patient_nurses'),
+    path('api/assign-nurse/<int:assignment_id>/', views.remove_nurse_assignment, name='remove_assignment'),
 ]
 

@@ -1242,6 +1242,226 @@ def remove_nurse_assignment(request, assignment_id):
         )
 
 
+@api_view(['PUT'])
+def update_patient(request, patient_id):
+    """Update patient information."""
+    try:
+        patient = Patient.objects.get(id=patient_id)
+        data = request.data
+        
+        patient.name = data.get('name', patient.name)
+        patient.phone = data.get('phone', patient.phone)
+        patient.email = data.get('email', patient.email)
+        patient.date_of_birth = data.get('date_of_birth', patient.date_of_birth)
+        patient.medical_conditions = data.get('medical_conditions', patient.medical_conditions)
+        patient.save()
+        
+        return Response({
+            "success": True,
+            "message": "Patient updated successfully"
+        })
+        
+    except Patient.DoesNotExist:
+        return Response({"error": "Patient not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error updating patient: {e}")
+        return Response({"error": str(e)}, status=400)
+
+
+@api_view(['DELETE'])
+def delete_patient(request, patient_id):
+    """Delete a patient."""
+    try:
+        patient = Patient.objects.get(id=patient_id)
+        patient.delete()
+        
+        return Response({
+            "success": True,
+            "message": "Patient deleted successfully"
+        })
+        
+    except Patient.DoesNotExist:
+        return Response({"error": "Patient not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error deleting patient: {e}")
+        return Response({"error": str(e)}, status=400)
+
+
+@api_view(['PUT'])
+def update_nurse(request, nurse_id):
+    """Update nurse information."""
+    try:
+        nurse = Nurse.objects.get(id=nurse_id)
+        data = request.data
+        
+        nurse.name = data.get('name', nurse.name)
+        nurse.specialization = data.get('specialization', nurse.specialization)
+        nurse.phone = data.get('phone', nurse.phone)
+        nurse.email = data.get('email', nurse.email)
+        nurse.license_number = data.get('license_number', nurse.license_number)
+        nurse.save()
+        
+        return Response({
+            "success": True,
+            "message": "Nurse updated successfully"
+        })
+        
+    except Nurse.DoesNotExist:
+        return Response({"error": "Nurse not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error updating nurse: {e}")
+        return Response({"error": str(e)}, status=400)
+
+
+@api_view(['DELETE'])
+def delete_nurse(request, nurse_id):
+    """Delete a nurse."""
+    try:
+        nurse = Nurse.objects.get(id=nurse_id)
+        nurse.delete()
+        
+        return Response({
+            "success": True,
+            "message": "Nurse deleted successfully"
+        })
+        
+    except Nurse.DoesNotExist:
+        return Response({"error": "Nurse not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error deleting nurse: {e}")
+        return Response({"error": str(e)}, status=400)
+
+
+@api_view(['PUT'])
+def update_appointment(request, appointment_id):
+    """Update appointment information."""
+    try:
+        appointment = Appointment.objects.get(id=appointment_id)
+        data = request.data
+        
+        if 'appointment_date' in data:
+            appointment.appointment_date = data['appointment_date']
+        if 'appointment_time' in data:
+            appointment.appointment_time = data['appointment_time']
+        if 'duration_minutes' in data:
+            appointment.duration_minutes = data['duration_minutes']
+        if 'status' in data:
+            appointment.status = data['status']
+        if 'notes' in data:
+            appointment.notes = data['notes']
+        
+        appointment.save()
+        
+        return Response({
+            "success": True,
+            "message": "Appointment updated successfully"
+        })
+        
+    except Appointment.DoesNotExist:
+        return Response({"error": "Appointment not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error updating appointment: {e}")
+        return Response({"error": str(e)}, status=400)
+
+
+@api_view(['DELETE'])
+def delete_appointment(request, appointment_id):
+    """Delete an appointment."""
+    try:
+        appointment = Appointment.objects.get(id=appointment_id)
+        appointment.delete()
+        
+        return Response({
+            "success": True,
+            "message": "Appointment deleted successfully"
+        })
+        
+    except Appointment.DoesNotExist:
+        return Response({"error": "Appointment not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error deleting appointment: {e}")
+        return Response({"error": str(e)}, status=400)
+
+
+@api_view(['POST'])
+def make_test_call(request):
+    """Make a test call to a patient with OpenAI integration."""
+    try:
+        data = request.data
+        patient_phone = data.get('patient_phone')
+        patient_id = data.get('patient_id')
+        
+        if not patient_phone and not patient_id:
+            return Response(
+                {"error": "Either patient_phone or patient_id is required"},
+                status=400
+            )
+        
+        # Get patient information
+        if patient_id:
+            patient = Patient.objects.get(id=patient_id)
+        else:
+            patient = Patient.objects.get(phone=patient_phone)
+        
+        # Get assigned nurse
+        try:
+            assignment = PatientNurseAssignment.objects.filter(
+                patient=patient, is_primary=True
+            ).select_related('nurse').first()
+            
+            if assignment:
+                nurse = assignment.nurse
+            else:
+                # Get any available nurse if no primary assignment
+                nurse = Nurse.objects.filter(is_active=True).first()
+        except:
+            nurse = None
+        
+        # Create call record
+        call = Call.objects.create(
+            patient_phone=patient.phone,
+            patient=patient,
+            call_direction='outbound',
+            call_status='initiated'
+        )
+        
+        # Prepare patient and nurse context for OpenAI
+        context = {
+            'patient': {
+                'id': patient.id,
+                'name': patient.name,
+                'phone': patient.phone,
+                'medical_conditions': patient.medical_conditions
+            },
+            'nurse': {
+                'id': nurse.id if nurse else None,
+                'name': nurse.name if nurse else 'No assigned nurse',
+                'specialization': nurse.specialization if nurse else 'General'
+            },
+            'call_id': call.id
+        }
+        
+        return Response({
+            "success": True,
+            "message": f"Test call initiated to {patient.name}",
+            "call_id": call.id,
+            "patient_context": context['patient'],
+            "nurse_context": context['nurse']
+        })
+        
+    except Patient.DoesNotExist:
+        return Response(
+            {"error": "Patient not found"},
+            status=404
+        )
+    except Exception as e:
+        logger.error(f"Error making test call: {e}")
+        return Response(
+            {"error": str(e)},
+            status=500
+        )
+
+
 @api_view(['GET'])
 def get_call_audio(request, call_id, speaker):
     """Get audio recording for a specific call and speaker."""

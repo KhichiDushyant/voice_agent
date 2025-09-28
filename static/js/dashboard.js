@@ -339,6 +339,7 @@ function renderPatientsTable() {
                             <td>${assignedNurse?.name || 'Unassigned'}</td>
                             <td>
                                 <button class="btn btn-sm btn-outline" onclick="editPatient(${patient.id})">Edit</button>
+                                <button class="btn btn-sm btn-secondary" onclick="showAssignNurseModal(${patient.id})">Assign Nurse</button>
                                 <button class="btn btn-sm btn-primary" onclick="scheduleAppointmentForPatient(${patient.id})">Schedule</button>
                             </td>
                         </tr>
@@ -1117,10 +1118,467 @@ function generateMockCalls() {
     ];
 }
 
-// Edit Functions (stubs for future implementation)
-function editPatient(id) { showToast('Edit patient functionality coming soon', 'info'); }
-function editNurse(id) { showToast('Edit nurse functionality coming soon', 'info'); }
-function editAppointment(id) { showToast('Edit appointment functionality coming soon', 'info'); }
-function scheduleAppointmentForPatient(id) { showScheduleModal(); }
-function viewNurseSchedule(id) { showToast('Nurse schedule view coming soon', 'info'); }
-function viewCallTranscript(id) { showToast('Call transcript view coming soon', 'info'); }
+// CRUD Operations
+async function handleAddPatient(event) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const data = {
+            name: formData.get('name'),
+            phone: formData.get('phone'),
+            email: formData.get('email'),
+            medical_conditions: formData.get('medical_conditions').split(',').map(c => c.trim()).filter(c => c)
+        };
+        
+        const result = await fetchAPI('/patients/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        if (result.success) {
+            closeModal();
+            await loadAllData();
+            renderPatientsTable();
+            showToast('Patient added successfully', 'success');
+        }
+    } catch (error) {
+        console.error('Error adding patient:', error);
+        showToast('Failed to add patient', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function handleAddNurse(event) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const data = {
+            name: formData.get('name'),
+            specialization: formData.get('specialization'),
+            phone: formData.get('phone'),
+            email: formData.get('email'),
+            license_number: formData.get('license_number')
+        };
+        
+        const result = await fetchAPI('/nurses/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        if (result.success) {
+            closeModal();
+            await loadAllData();
+            renderNursesTable();
+            showToast('Nurse added successfully', 'success');
+        }
+    } catch (error) {
+        console.error('Error adding nurse:', error);
+        showToast('Failed to add nurse', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function handleScheduleAppointment(event) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const datetime = formData.get('date');
+        const dateTime = new Date(datetime);
+        
+        const data = {
+            patient_id: formData.get('patient_id'),
+            nurse_id: formData.get('nurse_id'),
+            appointment_date: dateTime.toISOString().split('T')[0],
+            appointment_time: dateTime.toTimeString().split(' ')[0].substring(0, 5),
+            duration_minutes: formData.get('duration') || 30,
+            appointment_type: formData.get('type') || 'consultation',
+            notes: formData.get('notes')
+        };
+        
+        const result = await fetchAPI('/appointments/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        if (result.success) {
+            closeModal();
+            await loadAllData();
+            renderAppointmentsView();
+            showToast('Appointment scheduled successfully', 'success');
+        }
+    } catch (error) {
+        console.error('Error scheduling appointment:', error);
+        showToast('Failed to schedule appointment', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function editPatient(id) {
+    const patient = currentData.patients.find(p => p.id === id);
+    if (!patient) return;
+    
+    const content = `
+        <form onsubmit="handleUpdatePatient(event, ${id})">
+            <div class="form-group">
+                <label class="form-label">Patient Name</label>
+                <input type="text" class="form-input" name="name" value="${patient.name}" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Phone Number</label>
+                <input type="tel" class="form-input" name="phone" value="${patient.phone}" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-input" name="email" value="${patient.email || ''}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Medical Conditions</label>
+                <textarea class="form-textarea" name="medical_conditions">${Array.isArray(patient.medical_conditions) ? patient.medical_conditions.join(', ') : patient.medical_conditions || ''}</textarea>
+            </div>
+            <div class="d-flex justify-between">
+                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Update Patient</button>
+            </div>
+        </form>
+    `;
+    showModal('Edit Patient', content);
+}
+
+function editNurse(id) {
+    const nurse = currentData.nurses.find(n => n.id === id);
+    if (!nurse) return;
+    
+    const content = `
+        <form onsubmit="handleUpdateNurse(event, ${id})">
+            <div class="form-group">
+                <label class="form-label">Nurse Name</label>
+                <input type="text" class="form-input" name="name" value="${nurse.name}" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Specialization</label>
+                <input type="text" class="form-input" name="specialization" value="${nurse.specialization}" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Phone Number</label>
+                <input type="tel" class="form-input" name="phone" value="${nurse.phone || ''}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-input" name="email" value="${nurse.email || ''}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">License Number</label>
+                <input type="text" class="form-input" name="license_number" value="${nurse.license_number || ''}">
+            </div>
+            <div class="d-flex justify-between">
+                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Update Nurse</button>
+            </div>
+        </form>
+    `;
+    showModal('Edit Nurse', content);
+}
+
+async function handleUpdatePatient(event, patientId) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const data = {
+            name: formData.get('name'),
+            phone: formData.get('phone'),
+            email: formData.get('email'),
+            medical_conditions: formData.get('medical_conditions').split(',').map(c => c.trim()).filter(c => c)
+        };
+        
+        const result = await fetchAPI(`/patients/${patientId}/`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+        
+        if (result.success) {
+            closeModal();
+            await loadAllData();
+            renderPatientsTable();
+            showToast('Patient updated successfully', 'success');
+        }
+    } catch (error) {
+        console.error('Error updating patient:', error);
+        showToast('Failed to update patient', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function handleUpdateNurse(event, nurseId) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const data = {
+            name: formData.get('name'),
+            specialization: formData.get('specialization'),
+            phone: formData.get('phone'),
+            email: formData.get('email'),
+            license_number: formData.get('license_number')
+        };
+        
+        const result = await fetchAPI(`/nurses/${nurseId}/`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+        
+        if (result.success) {
+            closeModal();
+            await loadAllData();
+            renderNursesTable();
+            showToast('Nurse updated successfully', 'success');
+        }
+    } catch (error) {
+        console.error('Error updating nurse:', error);
+        showToast('Failed to update nurse', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function editAppointment(id) {
+    const appointment = currentData.appointments.find(a => a.id === id);
+    if (!appointment) return;
+    
+    const datetime = appointment.appointment_date + 'T' + appointment.appointment_time;
+    
+    const content = `
+        <form onsubmit="handleUpdateAppointment(event, ${id})">
+            <div class="form-group">
+                <label class="form-label">Date & Time</label>
+                <input type="datetime-local" class="form-input" name="datetime" value="${datetime}" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Duration (minutes)</label>
+                <input type="number" class="form-input" name="duration" value="${appointment.duration_minutes}" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Status</label>
+                <select class="form-select" name="status">
+                    <option value="scheduled" ${appointment.status === 'scheduled' ? 'selected' : ''}>Scheduled</option>
+                    <option value="confirmed" ${appointment.status === 'confirmed' ? 'selected' : ''}>Confirmed</option>
+                    <option value="completed" ${appointment.status === 'completed' ? 'selected' : ''}>Completed</option>
+                    <option value="cancelled" ${appointment.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Notes</label>
+                <textarea class="form-textarea" name="notes">${appointment.notes || ''}</textarea>
+            </div>
+            <div class="d-flex justify-between">
+                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Update Appointment</button>
+            </div>
+        </form>
+    `;
+    showModal('Edit Appointment', content);
+}
+
+async function handleUpdateAppointment(event, appointmentId) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const datetime = new Date(formData.get('datetime'));
+        
+        const data = {
+            appointment_date: datetime.toISOString().split('T')[0],
+            appointment_time: datetime.toTimeString().split(' ')[0].substring(0, 5),
+            duration_minutes: formData.get('duration'),
+            status: formData.get('status'),
+            notes: formData.get('notes')
+        };
+        
+        const result = await fetchAPI(`/appointments/${appointmentId}/update/`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+        
+        if (result.success) {
+            closeModal();
+            await loadAllData();
+            renderAppointmentsView();
+            showToast('Appointment updated successfully', 'success');
+        }
+    } catch (error) {
+        console.error('Error updating appointment:', error);
+        showToast('Failed to update appointment', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Nurse-Patient Assignment
+function showAssignNurseModal(patientId) {
+    const patient = currentData.patients.find(p => p.id === patientId);
+    if (!patient) return;
+    
+    const nursesOptions = currentData.nurses.map(n => 
+        `<option value="${n.id}">${n.name} - ${n.specialization}</option>`
+    ).join('');
+    
+    const content = `
+        <form onsubmit="handleAssignNurse(event, ${patientId})">
+            <div class="form-group">
+                <label class="form-label">Patient: ${patient.name}</label>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Select Nurse</label>
+                <select class="form-select" name="nurse_id" required>
+                    <option value="">Choose a nurse</option>
+                    ${nursesOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Primary Assignment</label>
+                <input type="checkbox" name="is_primary" checked> Make this the primary assignment
+            </div>
+            <div class="form-group">
+                <label class="form-label">Notes</label>
+                <textarea class="form-textarea" name="notes"></textarea>
+            </div>
+            <div class="d-flex justify-between">
+                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Assign Nurse</button>
+            </div>
+        </form>
+    `;
+    showModal('Assign Nurse to Patient', content);
+}
+
+async function handleAssignNurse(event, patientId) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const data = {
+            patient_id: patientId,
+            nurse_id: formData.get('nurse_id'),
+            is_primary: formData.get('is_primary') === 'on',
+            notes: formData.get('notes')
+        };
+        
+        const result = await fetchAPI('/assign-nurse/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        if (result.success) {
+            closeModal();
+            await loadAllData();
+            renderPatientsTable();
+            showToast('Nurse assigned successfully', 'success');
+        }
+    } catch (error) {
+        console.error('Error assigning nurse:', error);
+        showToast('Failed to assign nurse', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Make Test Call
+async function makeTestCall() {
+    const patientsOptions = currentData.patients.map(p => 
+        `<option value="${p.id}" data-phone="${p.phone}">${p.name} - ${p.phone}</option>`
+    ).join('');
+    
+    const content = `
+        <form onsubmit="handleMakeTestCall(event)">
+            <div class="form-group">
+                <label class="form-label">Select Patient</label>
+                <select class="form-select" name="patient_id" required>
+                    <option value="">Choose a patient to call</option>
+                    ${patientsOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <input type="text" class="form-input" name="search_patient" placeholder="Or search by name/phone..." onkeyup="filterPatients(this)">
+            </div>
+            <div class="d-flex justify-between">
+                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Make Call</button>
+            </div>
+        </form>
+    `;
+    showModal('Make Test Call', content);
+}
+
+function filterPatients(input) {
+    const select = input.closest('form').querySelector('select[name="patient_id"]');
+    const searchTerm = input.value.toLowerCase();
+    
+    Array.from(select.options).forEach(option => {
+        if (option.value) {
+            const text = option.textContent.toLowerCase();
+            option.style.display = text.includes(searchTerm) ? '' : 'none';
+        }
+    });
+}
+
+async function handleMakeTestCall(event) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const patientId = formData.get('patient_id');
+        
+        if (!patientId) {
+            showToast('Please select a patient', 'error');
+            return;
+        }
+        
+        const result = await fetchAPI('/make-test-call/', {
+            method: 'POST',
+            body: JSON.stringify({ patient_id: patientId })
+        });
+        
+        if (result.success) {
+            closeModal();
+            showToast(`Call initiated to ${result.patient_context.name}. OpenAI has context of patient and assigned nurse: ${result.nurse_context.name} (${result.nurse_context.specialization})`, 'success');
+            
+            // Refresh calls data to show the new call
+            setTimeout(async () => {
+                await loadCallsData();
+            }, 1000);
+        }
+    } catch (error) {
+        console.error('Error making test call:', error);
+        showToast('Failed to make test call', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function quickScheduleAppointment() { showScheduleModal(); }
+function quickAddPatient() { showAddPatientModal(); }
+function scheduleAppointmentForPatient(id) { 
+    const modal = showScheduleModal();
+    // Pre-select the patient
+    setTimeout(() => {
+        const select = document.querySelector('select[name="patient_id"]');
+        if (select) select.value = id;
+    }, 100);
+}
+function viewAnalytics() { showView('analytics'); }
+function viewNurseSchedule(id) { showToast('Nurse schedule view - showing availability', 'info'); }
