@@ -327,16 +327,14 @@ function renderPatientsTable() {
             </thead>
             <tbody>
                 ${currentData.patients.map(patient => {
-                    const assignedNurse = currentData.nurses.find(n => 
-                        currentData.appointments.some(a => a.patient_id === patient.id && a.nurse_id === n.id)
-                    );
+                    const assignedNurse = patient.assigned_nurse;
                     return `
                         <tr>
                             <td><strong>${patient.name}</strong></td>
                             <td>${patient.phone}</td>
                             <td>${patient.email || 'N/A'}</td>
                             <td>${Array.isArray(patient.medical_conditions) ? patient.medical_conditions.join(', ') : patient.medical_conditions || 'None'}</td>
-                            <td>${assignedNurse?.name || 'Unassigned'}</td>
+                            <td>${assignedNurse ? `${assignedNurse.name} (${assignedNurse.specialization})` : 'Unassigned'}</td>
                             <td>
                                 <button class="btn btn-sm btn-outline" onclick="editPatient(${patient.id})">Edit</button>
                                 <button class="btn btn-sm btn-secondary" onclick="showAssignNurseModal(${patient.id})">Assign Nurse</button>

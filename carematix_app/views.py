@@ -990,6 +990,22 @@ def get_all_patients(request):
         
         patient_data = []
         for patient in patients:
+            # Get assigned nurse (primary assignment for today or most recent)
+            current_assignment = PatientNurseAssignment.objects.filter(
+                patient=patient,
+                is_primary=True
+            ).select_related('nurse').order_by('-assignment_date').first()
+            
+            assigned_nurse = None
+            if current_assignment:
+                assigned_nurse = {
+                    "id": current_assignment.nurse.id,
+                    "name": current_assignment.nurse.name,
+                    "specialization": current_assignment.nurse.specialization,
+                    "assignment_date": current_assignment.assignment_date.isoformat(),
+                    "assignment_id": current_assignment.id
+                }
+            
             patient_data.append({
                 "id": patient.id,
                 "name": patient.name,
@@ -997,6 +1013,7 @@ def get_all_patients(request):
                 "email": patient.email,
                 "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
                 "medical_conditions": patient.medical_conditions,
+                "assigned_nurse": assigned_nurse,
                 "created_at": patient.created_at.isoformat(),
                 "updated_at": patient.updated_at.isoformat()
             })
@@ -1151,19 +1168,35 @@ def assign_nurse_to_patient(request):
         # Check if nurse exists
         nurse = Nurse.objects.get(id=nurse_id)
         
-        # Assign nurse to patient
-        assignment = PatientNurseAssignment.objects.create(
+        # Convert assignment_date to date object if it's a string
+        if isinstance(assignment_date, str):
+            assignment_date = datetime.strptime(assignment_date, '%Y-%m-%d').date()
+        
+        # Use get_or_create to avoid duplicate assignments
+        assignment, created = PatientNurseAssignment.objects.get_or_create(
             patient=patient,
             nurse=nurse,
             assignment_date=assignment_date,
-            is_primary=is_primary,
-            notes=notes
+            defaults={
+                'is_primary': is_primary,
+                'notes': notes
+            }
         )
+        
+        if not created:
+            # Update existing assignment
+            assignment.is_primary = is_primary
+            assignment.notes = notes
+            assignment.save()
+            message = f"Updated assignment: Nurse {nurse.name} for patient {patient.name}"
+        else:
+            message = f"Nurse {nurse.name} assigned to patient {patient.name}"
         
         return Response({
             "success": True, 
             "assignment_id": assignment.id,
-            "message": f"Nurse {nurse.name} assigned to patient {patient.name}"
+            "created": created,
+            "message": message
         })
         
     except Patient.DoesNotExist:
