@@ -332,4 +332,3 @@ For support and questions:
 ---
 
 **Carematix AI Voice Assistant - Django Version** - Professional healthcare scheduling made simple and efficient with real-time database integration.
-"# voice_agent" 

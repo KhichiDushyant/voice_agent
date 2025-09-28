@@ -1,0 +1,9 @@
+Django>=4.2.0
+djangorestframework>=3.14.0
+django-cors-headers>=4.3.0
+channels>=4.0.0
+# channels-redis>=4.1.0  # Commented out - using in-memory channel layer instead
+python-dotenv>=1.0.0
+websockets>=11.0.0
+twilio>=8.0.0
+# redis>=4.5.0  # Commented out - not required for in-memory setup

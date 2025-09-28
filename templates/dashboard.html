@@ -1,0 +1,89 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carematix AI Voice Assistant - Dashboard</title>
+    <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏥 Carematix AI Voice Assistant</h1>
+            <p>Professional Healthcare Scheduling System - Django Version</p>
+            <div style="margin-top: 15px;">
+                <span class="status-indicator status-online"></span>
+                <span>System Online</span>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3 id="patient-count">-</h3>
+                <p>Total Patients</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="nurse-count">-</h3>
+                <p>Active Nurses</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="appointment-count">-</h3>
+                <p>Appointments Today</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="call-count">-</h3>
+                <p>Total Calls</p>
+            </div>
+        </div>
+        
+        <div class="actions-grid">
+            <div class="action-card">
+                <h3>📞 Voice Calls</h3>
+                <p>Initiate outbound calls to patients for appointment scheduling</p>
+                <button class="btn" onclick="makeTestCall()">Make Test Call</button>
+                <button class="btn btn-secondary" onclick="viewCallHistory()">View Call History</button>
+            </div>
+            
+            <div class="action-card">
+                <h3>👥 Patient Management</h3>
+                <p>Manage patient information and medical records</p>
+                <button class="btn btn-secondary" onclick="viewPatients()">View Patients</button>
+                <button class="btn btn-success" onclick="addPatient()">Add Patient</button>
+            </div>
+            
+            <div class="action-card">
+                <h3>👩‍⚕️ Nurse Management</h3>
+                <p>Manage nurse information and availability schedules</p>
+                <button class="btn btn-secondary" onclick="viewNurses()">View Nurses</button>
+                <button class="btn btn-success" onclick="addNurse()">Add Nurse</button>
+            </div>
+            
+            <div class="action-card">
+                <h3>📅 Appointments</h3>
+                <p>Schedule and manage patient appointments</p>
+                <button class="btn btn-secondary" onclick="viewAppointments()">View Appointments</button>
+                <button class="btn btn-success" onclick="scheduleAppointment()">Schedule New</button>
+            </div>
+        </div>
+        
+        <div class="api-info">
+            <h3>🔧 API Endpoints</h3>
+            <p>Available REST API endpoints for integration:</p>
+            <div class="api-endpoint">GET / - Health check</div>
+            <div class="api-endpoint">POST /make-call/ - Initiate outbound call</div>
+            <div class="api-endpoint">GET /patients/ - Get all patients</div>
+            <div class="api-endpoint">GET /nurses/ - Get all nurses</div>
+            <div class="api-endpoint">GET /appointments/ - Get appointments</div>
+            <div class="api-endpoint">GET /calls/history/ - Get call history</div>
+            <div class="api-endpoint">WebSocket /ws/media-stream/ - Real-time audio streaming</div>
+        </div>
+        
+        <div class="footer">
+            <p>Powered by Django, Django REST Framework, Django Channels, Twilio, and OpenAI</p>
+        </div>
+    </div>
+    
+    <script src="{% static 'js/dashboard.js' %}"></script>
+</body>
+</html>
