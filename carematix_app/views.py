@@ -1172,24 +1172,40 @@ def assign_nurse_to_patient(request):
         if isinstance(assignment_date, str):
             assignment_date = datetime.strptime(assignment_date, '%Y-%m-%d').date()
         
-        # Use get_or_create to avoid duplicate assignments
-        assignment, created = PatientNurseAssignment.objects.get_or_create(
+        # Look for existing assignment for this patient on this date (regardless of nurse)
+        # Use filter().first() to handle cases where duplicates already exist
+        existing_assignments = PatientNurseAssignment.objects.filter(
             patient=patient,
-            nurse=nurse,
-            assignment_date=assignment_date,
-            defaults={
-                'is_primary': is_primary,
-                'notes': notes
-            }
-        )
+            assignment_date=assignment_date
+        ).order_by('id')
         
-        if not created:
-            # Update existing assignment
+        if existing_assignments.exists():
+            # Update the first assignment and clean up any duplicates
+            assignment = existing_assignments.first()
+            old_nurse = assignment.nurse.name
+            assignment.nurse = nurse
             assignment.is_primary = is_primary
             assignment.notes = notes
             assignment.save()
-            message = f"Updated assignment: Nurse {nurse.name} for patient {patient.name}"
+            
+            # Clean up any duplicate assignments for this patient/date
+            duplicate_count = existing_assignments.count() - 1
+            if duplicate_count > 0:
+                existing_assignments.exclude(id=assignment.id).delete()
+                logger.info(f"Cleaned up {duplicate_count} duplicate assignments for patient {patient.name}")
+            
+            created = False
+            message = f"Reassigned patient {patient.name} from {old_nurse} to {nurse.name}"
         else:
+            # No existing assignment for this date, create new one
+            assignment = PatientNurseAssignment.objects.create(
+                patient=patient,
+                nurse=nurse,
+                assignment_date=assignment_date,
+                is_primary=is_primary,
+                notes=notes
+            )
+            created = True
             message = f"Nurse {nurse.name} assigned to patient {patient.name}"
         
         return Response({
