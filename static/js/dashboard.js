@@ -124,10 +124,10 @@ async function loadAllData() {
             fetchAPI('/calls/')
         ]);
         
-        currentData.patients = patientsRes || [];
-        currentData.nurses = nursesRes || [];
-        currentData.appointments = appointmentsRes || [];
-        currentData.calls = callsRes || [];
+        currentData.patients = patientsRes.patients || patientsRes || [];
+        currentData.nurses = nursesRes.nurses || nursesRes || [];
+        currentData.appointments = appointmentsRes.appointments || appointmentsRes || [];
+        currentData.calls = callsRes.calls || callsRes || [];
         
         updateDashboardStats();
         updateDashboardCards();
