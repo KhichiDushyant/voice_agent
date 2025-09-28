@@ -45,6 +45,133 @@ def dashboard(request):
 
 
 @api_view(['GET'])
+def test_transcripts_page(request):
+    """Serve a test page for transcript functionality."""
+    from django.http import HttpResponse
+    html_content = '''<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Transcript Functionality</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .call-item { border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+        .btn { padding: 8px 12px; margin: 5px; background: #007bff; color: white; border: none; cursor: pointer; }
+        .btn:hover { background: #0056b3; }
+        .modal { display: none; position: fixed; top: 50px; left: 50px; right: 50px; bottom: 50px; background: white; border: 2px solid #333; padding: 20px; overflow-y: auto; z-index: 1000; }
+        .modal.show { display: block; }
+        .close { float: right; font-size: 20px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Transcript Testing Page</h1>
+    <p>This page tests the transcript functionality by directly calling the APIs.</p>
+    
+    <div id="calls-container"></div>
+    
+    <div id="modal" class="modal">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <div id="modal-content"></div>
+    </div>
+
+    <script>
+        async function loadCalls() {
+            try {
+                const response = await fetch('/calls/');
+                const calls = await response.json();
+                
+                const container = document.getElementById('calls-container');
+                container.innerHTML = calls.map(call => `
+                    <div class="call-item">
+                        <h3>Call ${call.id} - ${call.patient_name}</h3>
+                        <p><strong>Status:</strong> ${call.call_status}</p>
+                        <p><strong>Phone:</strong> ${call.patient_phone}</p>
+                        <p><strong>Duration:</strong> ${call.call_duration || 'N/A'} seconds</p>
+                        <button class="btn" onclick="viewTranscript(${call.id})">View Transcript</button>
+                        <button class="btn" onclick="viewDetails(${call.id})">View Details</button>
+                    </div>
+                `).join('');
+                
+                console.log('Loaded', calls.length, 'calls');
+            } catch (error) {
+                console.error('Error loading calls:', error);
+            }
+        }
+        
+        async function viewTranscript(callId) {
+            try {
+                const response = await fetch(`/calls/${callId}/transcript/`);
+                const data = await response.json();
+                const transcript = data.transcript;
+                
+                const content = `
+                    <h2>Transcript for Call ${callId}</h2>
+                    <h3>Full Conversation</h3>
+                    <div style="border: 1px solid #ddd; padding: 10px; background: #f9f9f9;">
+                        ${transcript.full_transcript.replace(/\\\\n/g, '<br>')}
+                    </div>
+                    <h3>Summary</h3>
+                    <p>${transcript.appointment_summary}</p>
+                    <h3>Outcome</h3>
+                    <p><strong>${transcript.scheduling_outcome}</strong></p>
+                `;
+                
+                showModal(content);
+            } catch (error) {
+                console.error('Error loading transcript:', error);
+                alert('Failed to load transcript');
+            }
+        }
+        
+        async function viewDetails(callId) {
+            try {
+                const response = await fetch(`/calls/${callId}/details/`);
+                const data = await response.json();
+                const call = data.call;
+                const transcript = data.transcript;
+                
+                const content = `
+                    <h2>Call Details for Call ${callId}</h2>
+                    <p><strong>Patient:</strong> ${call.patient_name}</p>
+                    <p><strong>Phone:</strong> ${call.patient_phone}</p>
+                    <p><strong>Status:</strong> ${call.call_status}</p>
+                    <p><strong>Direction:</strong> ${call.call_direction}</p>
+                    <p><strong>Duration:</strong> ${call.call_duration || 'N/A'} seconds</p>
+                    
+                    ${transcript ? `
+                        <h3>Transcript Available</h3>
+                        <p><strong>Summary:</strong> ${transcript.appointment_summary}</p>
+                        <p><strong>Outcome:</strong> ${transcript.scheduling_outcome}</p>
+                        <h4>Full Conversation</h4>
+                        <div style="border: 1px solid #ddd; padding: 10px; background: #f9f9f9; max-height: 200px; overflow-y: auto;">
+                            ${transcript.full_transcript.replace(/\\\\n/g, '<br>')}
+                        </div>
+                    ` : '<p>No transcript available</p>'}
+                `;
+                
+                showModal(content);
+            } catch (error) {
+                console.error('Error loading details:', error);
+                alert('Failed to load call details');
+            }
+        }
+        
+        function showModal(content) {
+            document.getElementById('modal-content').innerHTML = content;
+            document.getElementById('modal').classList.add('show');
+        }
+        
+        function closeModal() {
+            document.getElementById('modal').classList.remove('show');
+        }
+        
+        loadCalls();
+    </script>
+</body>
+</html>'''
+    return HttpResponse(html_content)
+
+
+@api_view(['GET'])
 def test_openai_connection(request):
     """Test OpenAI Realtime API connection."""
     try:

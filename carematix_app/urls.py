@@ -40,6 +40,9 @@ urlpatterns = [
     path('transcripts/', views.get_all_transcripts, name='all_transcripts'),
     path('audio/<int:call_id>/<str:speaker>/', views.get_call_audio, name='call_audio'),
     
+    # Testing endpoint for transcripts
+    path('test-transcripts/', views.test_transcripts_page, name='test_transcripts'),
+    
     # Dashboard API endpoints
     path('patients/', views.get_all_patients, name='all_patients'),
     path('patients/', views.add_patient, name='add_patient'),
