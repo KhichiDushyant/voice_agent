@@ -12,7 +12,9 @@ let currentData = {
 // Configuration
 const API_BASE = '';
 const REFRESH_INTERVAL = 30000;
+const CALLS_REFRESH_INTERVAL = 5000; // Refresh calls every 5 seconds for real-time updates
 let charts = {};
+let callsRefreshInterval;
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
@@ -127,7 +129,7 @@ async function loadAllData() {
         currentData.patients = patientsRes.patients || patientsRes || [];
         currentData.nurses = nursesRes.nurses || nursesRes || [];
         currentData.appointments = appointmentsRes.appointments || appointmentsRes || [];
-        currentData.calls = callsRes.calls || callsRes || [];
+        currentData.calls = Array.isArray(callsRes) ? callsRes : (callsRes.calls || []);
         
         updateDashboardStats();
         updateDashboardCards();
@@ -143,6 +145,26 @@ async function loadAllData() {
         };
         updateDashboardStats();
         updateDashboardCards();
+    }
+}
+
+// Load calls data separately for real-time updates
+async function loadCallsData() {
+    try {
+        const callsRes = await fetchAPI('/calls/');
+        currentData.calls = Array.isArray(callsRes) ? callsRes : (callsRes.calls || []);
+        
+        // Update calls display if currently viewing calls
+        if (currentView === 'calls') {
+            renderCallsTable();
+        }
+        
+        // Update dashboard cards
+        updateRecentCalls();
+        updateDashboardStats();
+        
+    } catch (error) {
+        console.error('Error loading calls data:', error);
     }
 }
 
@@ -224,7 +246,7 @@ function updateRecentAppointments() {
 function updateRecentCalls() {
     const container = document.getElementById('recent-calls');
     const recentCalls = currentData.calls
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
         .slice(0, 5);
     
     if (recentCalls.length === 0) {
@@ -236,16 +258,16 @@ function updateRecentCalls() {
         <div class="call-item p-3 border-bottom">
             <div class="d-flex justify-between align-center">
                 <div>
-                    <strong>${call.patient_phone}</strong>
+                    <strong>${call.patient_name || call.patient_phone}</strong>
                     <br>
-                    <small class="text-muted">${call.duration || 'N/A'} seconds</small>
+                    <small class="text-muted">${call.call_duration ? call.call_duration + ' seconds' : 'N/A'}</small>
                 </div>
                 <div class="text-right">
-                    <span class="badge ${call.status === 'completed' ? 'bg-success' : 'bg-warning'}">
-                        ${call.status}
+                    <span class="badge ${call.call_status === 'completed' ? 'bg-success' : call.call_status === 'failed' ? 'bg-danger' : 'bg-warning'}">
+                        ${call.call_status}
                     </span>
                     <br>
-                    <small class="text-muted">${formatDateTime(call.created_at)}</small>
+                    <small class="text-muted">${formatDateTime(call.start_time)}</small>
                 </div>
             </div>
         </div>
@@ -452,29 +474,35 @@ function renderCallsTable() {
             <thead>
                 <tr>
                     <th>Date/Time</th>
+                    <th>Patient Name</th>
                     <th>Patient Phone</th>
                     <th>Duration</th>
                     <th>Status</th>
-                    <th>Nurse</th>
+                    <th>Direction</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 ${currentData.calls.map(call => {
-                    const nurse = currentData.nurses.find(n => n.id === call.nurse_id);
                     return `
                         <tr>
-                            <td>${formatDateTime(call.created_at)}</td>
+                            <td>${formatDateTime(call.start_time)}</td>
+                            <td>${call.patient_name || 'Unknown'}</td>
                             <td>${call.patient_phone}</td>
-                            <td>${call.duration || 'N/A'} sec</td>
+                            <td>${call.call_duration ? call.call_duration + ' sec' : 'N/A'}</td>
                             <td>
-                                <span class="badge ${call.status === 'completed' ? 'bg-success' : call.status === 'failed' ? 'bg-danger' : 'bg-warning'}">
-                                    ${call.status}
+                                <span class="badge ${call.call_status === 'completed' ? 'bg-success' : call.call_status === 'failed' ? 'bg-danger' : 'bg-warning'}">
+                                    ${call.call_status}
                                 </span>
                             </td>
-                            <td>${nurse?.name || 'N/A'}</td>
+                            <td>
+                                <span class="badge ${call.call_direction === 'outbound' ? 'bg-primary' : 'bg-secondary'}">
+                                    ${call.call_direction}
+                                </span>
+                            </td>
                             <td>
                                 <button class="btn btn-sm btn-outline" onclick="viewCallTranscript(${call.id})">Transcript</button>
+                                <button class="btn btn-sm btn-outline" onclick="viewCallDetails(${call.id})">Details</button>
                             </td>
                         </tr>
                     `;
@@ -862,7 +890,7 @@ function updateCharts() {
 
 // Real-time Updates
 function setupRealTimeUpdates() {
-    // Refresh data every 30 seconds
+    // Refresh all data every 30 seconds
     setInterval(async () => {
         try {
             await loadAllData();
@@ -871,6 +899,175 @@ function setupRealTimeUpdates() {
             console.error('Real-time update failed:', error);
         }
     }, REFRESH_INTERVAL);
+    
+    // Refresh calls data more frequently (every 5 seconds) for real-time updates
+    callsRefreshInterval = setInterval(async () => {
+        try {
+            await loadCallsData();
+        } catch (error) {
+            console.error('Calls refresh failed:', error);
+        }
+    }, CALLS_REFRESH_INTERVAL);
+}
+
+// View call details in a modal
+async function viewCallDetails(callId) {
+    try {
+        showLoading(true);
+        const response = await fetchAPI(`/calls/${callId}/details/`);
+        
+        const call = response.call;
+        const transcript = response.transcript;
+        const conversation = response.conversation || [];
+        
+        const content = `
+            <div class="call-details">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>Call Information</h5>
+                        <p><strong>Call ID:</strong> ${call.call_sid}</p>
+                        <p><strong>Patient:</strong> ${call.patient_name || 'Unknown'}</p>
+                        <p><strong>Phone:</strong> ${call.patient_phone}</p>
+                        <p><strong>Direction:</strong> ${call.call_direction}</p>
+                        <p><strong>Status:</strong> <span class="badge ${call.call_status === 'completed' ? 'bg-success' : call.call_status === 'failed' ? 'bg-danger' : 'bg-warning'}">${call.call_status}</span></p>
+                        <p><strong>Duration:</strong> ${call.call_duration ? call.call_duration + ' seconds' : 'N/A'}</p>
+                        <p><strong>Start Time:</strong> ${formatDateTime(call.start_time)}</p>
+                        ${call.end_time ? `<p><strong>End Time:</strong> ${formatDateTime(call.end_time)}</p>` : ''}
+                    </div>
+                    <div class="col-md-6">
+                        <h5>Appointment Information</h5>
+                        ${call.appointment_scheduled ? `
+                            <p><strong>Nurse:</strong> ${call.nurse_name || 'N/A'}</p>
+                            <p><strong>Specialization:</strong> ${call.nurse_specialization || 'N/A'}</p>
+                            <p><strong>Appointment Scheduled:</strong> <span class="badge bg-success">Yes</span></p>
+                        ` : '<p><span class="badge bg-warning">No appointment scheduled</span></p>'}
+                    </div>
+                </div>
+                
+                ${transcript ? `
+                    <div class="transcript-section mt-4">
+                        <h5>Call Transcript</h5>
+                        <div class="transcript-content" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; border-radius: 5px;">
+                            ${transcript.full_transcript ? `
+                                <div class="full-transcript">
+                                    <h6>Full Conversation</h6>
+                                    <p>${transcript.full_transcript.replace(/\\n/g, '<br>')}</p>
+                                </div>
+                            ` : ''}
+                            
+                            ${transcript.appointment_summary ? `
+                                <div class="appointment-summary mt-3">
+                                    <h6>Appointment Summary</h6>
+                                    <p>${transcript.appointment_summary}</p>
+                                </div>
+                            ` : ''}
+                            
+                            ${transcript.scheduling_outcome ? `
+                                <div class="scheduling-outcome mt-3">
+                                    <h6>Scheduling Outcome</h6>
+                                    <span class="badge bg-info">${transcript.scheduling_outcome}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                ` : '<p class="mt-4"><em>No transcript available for this call.</em></p>'}
+                
+                ${conversation.length > 0 ? `
+                    <div class="conversation-section mt-4">
+                        <h5>Conversation Log</h5>
+                        <div class="conversation-log" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                            ${conversation.map(msg => `
+                                <div class="conversation-item mb-2">
+                                    <strong>${msg.speaker}:</strong> ${msg.message}
+                                    <small class="text-muted">(${formatDateTime(msg.timestamp)})</small>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        
+        showModal('Call Details', content);
+        
+    } catch (error) {
+        console.error('Error loading call details:', error);
+        showToast('Failed to load call details', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// View call transcript in a modal
+async function viewCallTranscript(callId) {
+    try {
+        showLoading(true);
+        const response = await fetchAPI(`/calls/${callId}/transcript/`);
+        
+        const transcript = response.transcript;
+        
+        const content = `
+            <div class="transcript-viewer">
+                <div class="transcript-header mb-3">
+                    <p><strong>Call ID:</strong> ${callId}</p>
+                    <p><strong>Generated:</strong> ${formatDateTime(transcript.created_at)}</p>
+                </div>
+                
+                ${transcript.full_transcript ? `
+                    <div class="full-transcript mb-4">
+                        <h5>Complete Transcript</h5>
+                        <div class="transcript-content" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; border-radius: 5px; background: #f8f9fa;">
+                            ${transcript.full_transcript.replace(/\\n/g, '<br>')}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <div class="row">
+                    ${transcript.patient_transcript ? `
+                        <div class="col-md-6">
+                            <h6>Patient Transcript</h6>
+                            <div class="transcript-section" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                                ${transcript.patient_transcript.replace(/\\n/g, '<br>')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${transcript.assistant_transcript ? `
+                        <div class="col-md-6">
+                            <h6>Assistant Transcript</h6>
+                            <div class="transcript-section" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                                ${transcript.assistant_transcript.replace(/\\n/g, '<br>')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                ${transcript.appointment_summary ? `
+                    <div class="appointment-summary mt-4">
+                        <h5>Appointment Summary</h5>
+                        <div class="summary-content" style="border: 1px solid #ddd; padding: 15px; border-radius: 5px; background: #f0f8ff;">
+                            ${transcript.appointment_summary}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${transcript.scheduling_outcome ? `
+                    <div class="scheduling-outcome mt-3">
+                        <h5>Scheduling Outcome</h5>
+                        <span class="badge badge-lg ${transcript.scheduling_outcome === 'scheduled' ? 'bg-success' : 'bg-warning'}">${transcript.scheduling_outcome}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        
+        showModal('Call Transcript', content);
+        
+    } catch (error) {
+        console.error('Error loading call transcript:', error);
+        showToast('Failed to load call transcript', 'error');
+    } finally {
+        showLoading(false);
+    }
 }
 
 function updateNotificationCount() {
