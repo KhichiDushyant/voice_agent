@@ -7,3 +7,10 @@ python-dotenv>=1.0.0
 websockets>=11.0.0
 twilio>=8.0.0
 # redis>=4.5.0  # Commented out - not required for in-memory setup
+channels
+Django
+django-cors-headers
+djangorestframework
+python-dotenv
+twilio
+websockets

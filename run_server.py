@@ -22,4 +22,4 @@ if __name__ == "__main__":
     
     # Start the server
     print("Starting Django server with ASGI support...")
-    execute_from_command_line(["manage.py", "runserver", "0.0.0.0:8000"])
+    execute_from_command_line(["manage.py", "runserver", "0.0.0.0:5000"])
