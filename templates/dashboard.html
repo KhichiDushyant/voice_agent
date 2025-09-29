@@ -11,6 +11,7 @@
 </head>
 <body>
     <div id="app">
+        {% csrf_token %}
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="sidebar-header">
@@ -31,6 +32,10 @@
                 <a href="#nurses" class="nav-item" data-view="nurses">
                     <i class="fas fa-user-nurse"></i>
                     <span>Nurses</span>
+                </a>
+                <a href="#nurse-schedule" class="nav-item" data-view="nurse-schedule">
+                    <i class="fas fa-calendar-alt"></i>
+                    <span>Nurse Schedule</span>
                 </a>
                 <a href="#appointments" class="nav-item" data-view="appointments">
                     <i class="fas fa-calendar-check"></i>
@@ -212,6 +217,74 @@
                 </div>
             </div>
             
+            <!-- Nurse Schedule View -->
+            <div class="view" id="nurse-schedule-view" style="display: none;">
+                <div class="page-header">
+                    <h2>Nurse Schedule & Availability</h2>
+                    <div class="schedule-controls">
+                        <button class="btn btn-outline" onclick="previousWeek()">
+                            <i class="fas fa-chevron-left"></i> Previous Week
+                        </button>
+                        <span class="current-week" id="current-week">Week of Dec 18, 2023</span>
+                        <button class="btn btn-outline" onclick="nextWeek()">
+                            Next Week <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <button class="btn btn-primary" onclick="showAddAvailabilityModal()">
+                            <i class="fas fa-plus"></i> Add Availability
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="schedule-container">
+                    <div class="nurse-selector">
+                        <label for="nurse-filter-select">Filter by Nurse:</label>
+                        <select id="nurse-filter-select" class="form-select" onchange="filterNurseSchedule()">
+                            <option value="">All Nurses</option>
+                        </select>
+                    </div>
+                    
+                    <div class="schedule-grid">
+                        <div class="schedule-header">
+                            <div class="time-column">Time</div>
+                            <div class="day-column">Monday</div>
+                            <div class="day-column">Tuesday</div>
+                            <div class="day-column">Wednesday</div>
+                            <div class="day-column">Thursday</div>
+                            <div class="day-column">Friday</div>
+                            <div class="day-column">Saturday</div>
+                            <div class="day-column">Sunday</div>
+                        </div>
+                        <div class="schedule-body" id="schedule-body">
+                            <!-- Schedule content will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="availability-summary">
+                    <div class="summary-card">
+                        <h3><i class="fas fa-chart-pie"></i> Availability Summary</h3>
+                        <div class="summary-stats" id="availability-stats">
+                            <div class="stat-item">
+                                <span class="stat-number" id="total-nurses">-</span>
+                                <span class="stat-label">Total Nurses</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-number" id="available-today">-</span>
+                                <span class="stat-label">Available Slots</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-number" id="busy-today">-</span>
+                                <span class="stat-label">Busy Slots</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-number" id="coverage-percentage">-</span>
+                                <span class="stat-label">Coverage %</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Appointments View -->
             <div class="view" id="appointments-view" style="display: none;">
                 <div class="page-header">
@@ -227,20 +300,87 @@
             <!-- Calls View -->
             <div class="view" id="calls-view" style="display: none;">
                 <div class="page-header">
-                    <h2>Call History & Transcripts</h2>
-                    <button class="btn btn-primary" onclick="makeTestCall()"><i class="fas fa-phone"></i> Make Test Call</button>
-                </div>
-                <div class="data-table-container">
-                    <div class="table-filters">
-                        <input type="text" id="calls-search" placeholder="Search calls..." class="search-input">
-                        <input type="date" id="calls-date-filter" class="filter-select">
-                        <select id="calls-status-filter" class="filter-select">
-                            <option value="">All Calls</option>
-                            <option value="completed">Completed</option>
-                            <option value="failed">Failed</option>
-                        </select>
+                    <h2><i class="fas fa-headset"></i> Live Call Center</h2>
+                    <div class="call-controls">
+                        <button class="btn btn-success" onclick="makeTestCall()">
+                            <i class="fas fa-phone"></i> Make Call
+                        </button>
+                        <button class="btn btn-warning" onclick="toggleAutoRefresh()">
+                            <i class="fas fa-sync-alt"></i> <span id="auto-refresh-text">Auto Refresh</span>
+                        </button>
                     </div>
-                    <div id="calls-table" class="data-table"></div>
+                </div>
+                
+                <!-- Call Stats Dashboard -->
+                <div class="call-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-phone-volume"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="total-calls">-</div>
+                            <div class="stat-label">Total Calls</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="completed-calls">-</div>
+                            <div class="stat-label">Completed</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-times-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="failed-calls">-</div>
+                            <div class="stat-label">Failed</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="avg-duration">-</div>
+                            <div class="stat-label">Avg Duration</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Call Feed -->
+                <div class="live-call-feed">
+                    <div class="feed-header">
+                        <h3><i class="fas fa-broadcast-tower"></i> Live Call Activity</h3>
+                        <div class="live-indicator">
+                            <span class="pulse-dot"></span>
+                            <span>LIVE</span>
+                        </div>
+                    </div>
+                    <div id="live-calls-container" class="live-calls-list">
+                        <!-- Live calls will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Call History Table -->
+                <div class="call-history-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-history"></i> Call History</h3>
+                        <div class="table-filters">
+                            <input type="text" id="calls-search" placeholder="Search calls..." class="search-input">
+                            <input type="date" id="calls-date-filter" class="filter-select">
+                            <select id="calls-status-filter" class="filter-select">
+                                <option value="">All Status</option>
+                                <option value="completed">Completed</option>
+                                <option value="failed">Failed</option>
+                                <option value="in_progress">In Progress</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="calls-table" class="modern-calls-table"></div>
                 </div>
             </div>
             

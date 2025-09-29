@@ -1,0 +1,28 @@
+
+===============================================
+CAREMATIX CALL TRANSCRIPT (BASIC)
+===============================================
+Call ID: 27
+Call SID: CA32cdadc303e0f1b83362212f561ef353
+Patient: Dushyant Khichi (+917023436354)
+Nurse: Dr. Maria Garcia (Mental Health)
+Call Start: 2025-09-29 07:20:23
+Call End: 2025-09-29 07:20:42
+Call Duration: 18 seconds
+Current Date: Monday, September 29, 2025
+Current Time: 07:20 AM
+===============================================
+
+NOTE: No conversation parts were captured during this call.
+This may indicate an issue with the WebSocket connection or transcript processing.
+
+
+==================================================
+PATIENT TRANSCRIPT:
+==================================================
+No patient messages captured
+
+==================================================
+ASSISTANT TRANSCRIPT:
+==================================================
+No assistant messages captured

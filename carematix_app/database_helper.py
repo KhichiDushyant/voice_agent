@@ -293,16 +293,26 @@ class VoiceAgentDatabaseHelper:
                 return False
         
         # Check for conflicts with existing appointments
-        end_time = (datetime.combine(date, time) + timedelta(minutes=duration)).time()
+        requested_start = datetime.combine(date, time)
+        requested_end = requested_start + timedelta(minutes=duration)
         
-        conflicting_appointments = Appointment.objects.filter(
+        # Get all appointments for this nurse on this date
+        existing_appointments = Appointment.objects.filter(
             nurse_id=nurse_id,
             appointment_date=date,
-            appointment_time=time,
             status__in=['scheduled', 'confirmed']
-        ).exists()
+        )
         
-        return not conflicting_appointments
+        # Check for time overlaps
+        for appointment in existing_appointments:
+            appointment_start = datetime.combine(date, appointment.appointment_time)
+            appointment_end = appointment_start + timedelta(minutes=appointment.duration_minutes)
+            
+            # Check if there's any overlap
+            if (requested_start < appointment_end and requested_end > appointment_start):
+                return False
+        
+        return True
     
     def _get_nurse_available_slots(self, nurse_id: int, date: datetime.date, slot_duration: int = 30) -> List[str]:
         """Get available time slots for a nurse on a specific date"""

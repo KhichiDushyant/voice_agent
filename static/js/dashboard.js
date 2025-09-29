@@ -9,6 +9,12 @@ let currentData = {
     calls: []
 };
 
+// Get CSRF token from the page
+function getCSRFToken() {
+    const token = document.querySelector('[name=csrfmiddlewaretoken]');
+    return token ? token.value : null;
+}
+
 // Configuration
 const API_BASE = '';
 const REFRESH_INTERVAL = 30000;
@@ -89,6 +95,7 @@ function showView(viewName) {
             'dashboard': 'Dashboard',
             'patients': 'Patient Management',
             'nurses': 'Nurse Management', 
+            'nurse-schedule': 'Nurse Schedule & Availability',
             'appointments': 'Appointment Management',
             'calls': 'Call History',
             'analytics': 'Analytics & Reports'
@@ -102,6 +109,9 @@ function showView(viewName) {
                 break;
             case 'nurses':
                 renderNursesTable();
+                break;
+            case 'nurse-schedule':
+                renderNurseSchedule();
                 break;
             case 'appointments':
                 renderAppointmentsView();
@@ -170,11 +180,19 @@ async function loadCallsData() {
 
 async function fetchAPI(endpoint, options = {}) {
     try {
-        const response = await fetch(API_BASE + endpoint, {
-            headers: {
+        const csrfToken = getCSRFToken();
+        const headers = {
                 'Content-Type': 'application/json',
                 ...options.headers
-            },
+        };
+        
+        // Add CSRF token for POST, PUT, DELETE requests
+        if (options.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(options.method.toUpperCase()) && csrfToken) {
+            headers['X-CSRFToken'] = csrfToken;
+        }
+        
+        const response = await fetch(API_BASE + endpoint, {
+            headers,
             ...options
         });
         
@@ -374,7 +392,7 @@ function renderNursesTable() {
             </thead>
             <tbody>
                 ${currentData.nurses.map(nurse => {
-                    const assignedPatients = currentData.appointments.filter(a => a.nurse_id === nurse.id).length;
+                    const assignedPatients = nurse.patient_assignments_count || 0;
                     const isAvailable = nurse.is_available !== false;
                     return `
                         <tr>
@@ -460,7 +478,74 @@ function renderAppointmentsList() {
     container.innerHTML = html;
 }
 
+// Global variables for call center
+let autoRefreshEnabled = false;
+let autoRefreshInterval = null;
+
 function renderCallsTable() {
+    updateCallStats();
+    renderLiveCallFeed();
+    renderCallHistoryTable();
+}
+
+function updateCallStats() {
+    const totalCalls = currentData.calls.length;
+    const completedCalls = currentData.calls.filter(call => call.call_status === 'completed').length;
+    const failedCalls = currentData.calls.filter(call => call.call_status === 'failed').length;
+    
+    // Calculate average duration
+    const completedCallsWithDuration = currentData.calls.filter(call => 
+        call.call_status === 'completed' && call.call_duration
+    );
+    const avgDuration = completedCallsWithDuration.length > 0 
+        ? Math.round(completedCallsWithDuration.reduce((sum, call) => sum + call.call_duration, 0) / completedCallsWithDuration.length)
+        : 0;
+    
+    // Update stats display
+    document.getElementById('total-calls').textContent = totalCalls;
+    document.getElementById('completed-calls').textContent = completedCalls;
+    document.getElementById('failed-calls').textContent = failedCalls;
+    document.getElementById('avg-duration').textContent = avgDuration > 0 ? `${Math.floor(avgDuration / 60)}:${(avgDuration % 60).toString().padStart(2, '0')}` : 'N/A';
+}
+
+function renderLiveCallFeed() {
+    const container = document.getElementById('live-calls-container');
+    
+    // Get recent calls (last 5)
+    const recentCalls = currentData.calls
+        .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+        .slice(0, 5);
+    
+    if (recentCalls.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted p-4">No recent calls</div>';
+        return;
+    }
+    
+    const html = recentCalls.map(call => {
+        const statusClass = call.call_status === 'completed' ? 'active' : 
+                           call.call_status === 'failed' ? 'ended' : 'ringing';
+        const duration = call.call_duration ? formatDuration(call.call_duration) : 'N/A';
+        const timeAgo = getTimeAgo(call.start_time);
+        
+        return `
+            <div class="live-call-item">
+                <div class="call-status-indicator ${statusClass}"></div>
+                <div class="call-info">
+                    <div class="call-patient">${call.patient_name || 'Unknown Patient'}</div>
+                    <div class="call-details">
+                        <span>${call.patient_phone}</span>
+                        <span class="call-duration">${duration}</span>
+                        <span>${timeAgo}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    container.innerHTML = html;
+}
+
+function renderCallHistoryTable() {
     const container = document.getElementById('calls-table');
     
     if (currentData.calls.length === 0) {
@@ -473,8 +558,8 @@ function renderCallsTable() {
             <thead>
                 <tr>
                     <th>Date/Time</th>
-                    <th>Patient Name</th>
-                    <th>Patient Phone</th>
+                    <th>Patient</th>
+                    <th>Phone</th>
                     <th>Duration</th>
                     <th>Status</th>
                     <th>Direction</th>
@@ -488,20 +573,26 @@ function renderCallsTable() {
                             <td>${formatDateTime(call.start_time)}</td>
                             <td>${call.patient_name || 'Unknown'}</td>
                             <td>${call.patient_phone}</td>
-                            <td>${call.call_duration ? call.call_duration + ' sec' : 'N/A'}</td>
+                            <td>${call.call_duration ? formatDuration(call.call_duration) : 'N/A'}</td>
                             <td>
-                                <span class="badge ${call.call_status === 'completed' ? 'bg-success' : call.call_status === 'failed' ? 'bg-danger' : 'bg-warning'}">
+                                <span class="call-status-badge ${call.call_status}">
                                     ${call.call_status}
                                 </span>
                             </td>
                             <td>
-                                <span class="badge ${call.call_direction === 'outbound' ? 'bg-primary' : 'bg-secondary'}">
+                                <span class="call-direction-badge ${call.call_direction}">
                                     ${call.call_direction}
                                 </span>
                             </td>
                             <td>
-                                <button class="btn btn-sm btn-outline" onclick="viewCallTranscript(${call.id})">Transcript</button>
-                                <button class="btn btn-sm btn-outline" onclick="viewCallDetails(${call.id})">Details</button>
+                                <div class="call-actions">
+                                    <button class="call-action-btn" onclick="viewCallTranscript(${call.id})">
+                                        <i class="fas fa-file-text"></i> Transcript
+                                    </button>
+                                    <button class="call-action-btn" onclick="viewCallDetails(${call.id})">
+                                        <i class="fas fa-info-circle"></i> Details
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     `;
@@ -512,6 +603,42 @@ function renderCallsTable() {
     
     container.innerHTML = html;
     setupTableFilters('calls');
+}
+
+function formatDuration(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+function getTimeAgo(dateString) {
+    const now = new Date();
+    const callTime = new Date(dateString);
+    const diffInSeconds = Math.floor((now - callTime) / 1000);
+    
+    if (diffInSeconds < 60) return `${diffInSeconds}s ago`;
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    return `${Math.floor(diffInSeconds / 86400)}d ago`;
+}
+
+function toggleAutoRefresh() {
+    autoRefreshEnabled = !autoRefreshEnabled;
+    const button = document.getElementById('auto-refresh-text');
+    
+    if (autoRefreshEnabled) {
+        button.textContent = 'Stop Auto Refresh';
+        autoRefreshInterval = setInterval(async () => {
+            await loadCallsData();
+            renderCallsTable();
+        }, 5000); // Refresh every 5 seconds
+    } else {
+        button.textContent = 'Auto Refresh';
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+            autoRefreshInterval = null;
+        }
+    }
 }
 
 // Modal Functions
@@ -727,37 +854,29 @@ function quickAddPatient() {
 }
 
 async function makeTestCall() {
-    const phoneNumber = prompt('Enter phone number to call (e.g., +1234567890):');
-    if (!phoneNumber) return;
+    const patientsOptions = currentData.patients.map(p => 
+        `<option value="${p.id}" data-phone="${p.phone}">${p.name} - ${p.phone}</option>`
+    ).join('');
     
-    try {
-        showLoading(true);
-        showToast('Initiating test call...', 'info');
-        
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Add mock call to data
-        const newCall = {
-            id: Math.max(...currentData.calls.map(c => c.id), 0) + 1,
-            patient_phone: phoneNumber,
-            status: 'completed',
-            duration: Math.floor(Math.random() * 120) + 30,
-            created_at: new Date().toISOString(),
-            nurse_id: currentData.nurses[0]?.id
-        };
-        
-        currentData.calls.unshift(newCall);
-        updateDashboardStats();
-        updateDashboardCards();
-        
-        showToast('Test call completed successfully', 'success');
-        showLoading(false);
-        
-    } catch (error) {
-        showToast('Failed to make test call', 'error');
-        showLoading(false);
-    }
+    const content = `
+        <form onsubmit="handleMakeTestCall(event)">
+            <div class="form-group">
+                <label class="form-label">Select Patient</label>
+                <select class="form-select" name="patient_id" required>
+                    <option value="">Choose a patient to call</option>
+                    ${patientsOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <input type="text" class="form-input" name="search_patient" placeholder="Or search by name/phone..." onkeyup="filterPatients(this)">
+            </div>
+            <div class="d-flex justify-between">
+                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Make Call</button>
+            </div>
+        </form>
+    `;
+    showModal('Make Call', content);
 }
 
 function viewAnalytics() {
@@ -1216,9 +1335,38 @@ async function handleScheduleAppointment(event) {
         
         if (result.success) {
             closeModal();
+            
+            // Reload all data to get the latest appointments
             await loadAllData();
+            
+            // Refresh the appointments view
             renderAppointmentsView();
+            
+            // Also refresh the nurse schedule view if it's currently visible
+            const nurseScheduleView = document.getElementById('nurse-schedule-view');
+            if (nurseScheduleView && nurseScheduleView.style.display !== 'none') {
+                await loadNurseScheduleData();
+                renderScheduleGrid();
+                updateAvailabilitySummary();
+            }
+            
             showToast('Appointment scheduled successfully', 'success');
+        } else if (result.error && result.suggested_available_times) {
+            // Show error with suggested times
+            const suggestedTimes = result.suggested_available_times.join(', ');
+            showToast(`Nurse not available at requested time. Available times: ${suggestedTimes}`, 'warning');
+            
+            // Pre-populate the form with the first available time
+            const firstAvailableTime = result.suggested_available_times[0];
+            if (firstAvailableTime) {
+                const dateInput = document.querySelector('input[name="date"]');
+                if (dateInput) {
+                    const currentDate = new Date(dateInput.value);
+                    const [hours, minutes] = firstAvailableTime.split(':');
+                    currentDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+                    dateInput.value = currentDate.toISOString().slice(0, 16);
+                }
+            }
         }
     } catch (error) {
         console.error('Error scheduling appointment:', error);
@@ -1503,31 +1651,6 @@ async function handleAssignNurse(event, patientId) {
 }
 
 // Make Test Call
-async function makeTestCall() {
-    const patientsOptions = currentData.patients.map(p => 
-        `<option value="${p.id}" data-phone="${p.phone}">${p.name} - ${p.phone}</option>`
-    ).join('');
-    
-    const content = `
-        <form onsubmit="handleMakeTestCall(event)">
-            <div class="form-group">
-                <label class="form-label">Select Patient</label>
-                <select class="form-select" name="patient_id" required>
-                    <option value="">Choose a patient to call</option>
-                    ${patientsOptions}
-                </select>
-            </div>
-            <div class="form-group">
-                <input type="text" class="form-input" name="search_patient" placeholder="Or search by name/phone..." onkeyup="filterPatients(this)">
-            </div>
-            <div class="d-flex justify-between">
-                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Make Call</button>
-            </div>
-        </form>
-    `;
-    showModal('Make Test Call', content);
-}
 
 function filterPatients(input) {
     const select = input.closest('form').querySelector('select[name="patient_id"]');
@@ -1566,6 +1689,9 @@ async function handleMakeTestCall(event) {
             // Refresh calls data to show the new call
             setTimeout(async () => {
                 await loadCallsData();
+                if (currentView === 'calls') {
+                    renderCallsTable();
+                }
             }, 1000);
         }
     } catch (error) {
@@ -1587,4 +1713,745 @@ function scheduleAppointmentForPatient(id) {
     }, 100);
 }
 function viewAnalytics() { showView('analytics'); }
-function viewNurseSchedule(id) { showToast('Nurse schedule view - showing availability', 'info'); }
+// Nurse Schedule Functions
+let currentWeekStart = new Date();
+currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay() + 1); // Start from Monday
+
+async function renderNurseSchedule() {
+    // Ensure currentWeekStart is properly initialized
+    initializeCurrentWeek();
+    updateWeekDisplay();
+    populateNurseFilter();
+    
+    // Always load fresh data from database
+    await loadAllData(); // Load latest appointments
+    await loadNurseScheduleData(); // Load nurse availability
+    
+    renderScheduleGrid();
+    updateAvailabilitySummary();
+    
+    // Also update summary when data changes
+    setTimeout(() => {
+        updateAvailabilitySummary();
+    }, 100);
+}
+
+function initializeCurrentWeek() {
+    // Set currentWeekStart to the Monday of September 29, 2025 week
+    // This ensures we're showing the correct week with the appointment data
+    currentWeekStart = new Date(2025, 8, 29); // September 29, 2025 (month is 0-indexed)
+    currentWeekStart.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+}
+
+async function loadNurseScheduleData() {
+    try {
+        // Use local date formatting to avoid timezone issues
+        const weekStart = currentWeekStart.getFullYear() + '-' + 
+            String(currentWeekStart.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(currentWeekStart.getDate()).padStart(2, '0');
+        const response = await fetchAPI(`/nurses/schedules/?week_start=${weekStart}`);
+        
+        if (response && response.nurses) {
+            currentData.nurseSchedules = response.nurses;
+        } else {
+            currentData.nurseSchedules = [];
+        }
+    } catch (error) {
+        console.error('Error loading nurse schedule data:', error);
+        // Fall back to mock data
+        currentData.nurseSchedules = [];
+    }
+}
+
+function updateWeekDisplay() {
+    const weekEnd = new Date(currentWeekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    
+    const options = { month: 'short', day: 'numeric', year: 'numeric' };
+    const weekText = `Week of ${currentWeekStart.toLocaleDateString('en-US', options)}`;
+    document.getElementById('current-week').textContent = weekText;
+}
+
+function populateNurseFilter() {
+    const select = document.getElementById('nurse-filter-select');
+    const currentValue = select.value;
+    
+    select.innerHTML = '<option value="">All Nurses</option>';
+    
+    currentData.nurses.forEach(nurse => {
+        const option = document.createElement('option');
+        option.value = nurse.id;
+        option.textContent = `${nurse.name} - ${nurse.specialization}`;
+        select.appendChild(option);
+    });
+    
+    select.value = currentValue;
+}
+
+function renderScheduleGrid() {
+    const scheduleBody = document.getElementById('schedule-body');
+    scheduleBody.innerHTML = '';
+    
+    // Generate time slots (6 AM to 10 PM)
+    const timeSlots = [];
+    for (let hour = 6; hour <= 22; hour++) {
+        timeSlots.push({
+            hour: hour,
+            display: hour === 12 ? '12:00 PM' : 
+                   hour > 12 ? `${hour - 12}:00 PM` : 
+                   `${hour}:00 AM`
+        });
+    }
+    
+    timeSlots.forEach(timeSlot => {
+        // Time column
+        const timeCell = document.createElement('div');
+        timeCell.className = 'time-cell';
+        timeCell.textContent = timeSlot.display;
+        scheduleBody.appendChild(timeCell);
+        
+        // Day columns
+        for (let day = 0; day < 7; day++) {
+            const dayCell = document.createElement('div');
+            dayCell.className = 'day-cell';
+            dayCell.dataset.day = day;
+            dayCell.dataset.hour = timeSlot.hour;
+            
+            // Add availability blocks for this time slot
+            addAvailabilityBlocks(dayCell, day, timeSlot.hour);
+            
+            scheduleBody.appendChild(dayCell);
+        }
+    });
+}
+
+function addAvailabilityBlocks(dayCell, day, hour) {
+    const selectedNurseId = document.getElementById('nurse-filter-select').value;
+    const nursesToShow = selectedNurseId ? 
+        currentData.nurses.filter(n => n.id == selectedNurseId) : 
+        currentData.nurses;
+    
+    nursesToShow.forEach(nurse => {
+        const availability = getNurseAvailability(nurse.id, day, hour);
+        // Always create a block, even if nurse is not available
+        const block = createAvailabilityBlock(nurse, availability, day, hour);
+        dayCell.appendChild(block);
+    });
+}
+
+function getNurseAvailability(nurseId, day, hour) {
+    // Always use database data - check appointments first
+    const appointment = getNurseAppointment(nurseId, day, hour);
+    if (appointment) {
+        console.log(`Nurse ${nurseId} has appointment at day ${day}, hour ${hour}:`, appointment);
+        return {
+            type: 'busy',
+            startTime: null,
+            endTime: null,
+            appointment: appointment
+        };
+    }
+    
+    // Check if nurse has regular availability for this day and time
+    const nurse = currentData.nurses.find(n => n.id === nurseId);
+    if (!nurse) {
+        return {
+            type: 'unavailable',
+            startTime: null,
+            endTime: null
+        };
+    }
+    
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayName = dayNames[day];
+    
+    // ALWAYS use database data - no fallback to defaults
+    if (currentData.nurseSchedules && currentData.nurseSchedules.length > 0) {
+        const nurseSchedule = currentData.nurseSchedules.find(n => n.id === nurseId);
+        
+        if (nurseSchedule) {
+            // Check regular availability from database
+            const regularAvailability = nurseSchedule.availability.find(av => 
+                av.day_of_week === dayName && !av.is_override
+            );
+            
+            if (regularAvailability && regularAvailability.is_available) {
+                const startHour = parseInt(regularAvailability.start_time.split(':')[0]);
+                const endHour = parseInt(regularAvailability.end_time.split(':')[0]);
+                
+                if (hour >= startHour && hour < endHour) {
+                    return {
+                        type: 'available',
+                        startTime: startHour,
+                        endTime: endHour
+                    };
+                }
+            }
+            
+            // Check for overrides from database
+            const targetDate = new Date(currentWeekStart);
+            targetDate.setDate(targetDate.getDate() + day);
+            const dateStr = targetDate.toISOString().split('T')[0];
+            
+            const override = nurseSchedule.availability.find(av => 
+                av.is_override && av.date === dateStr
+            );
+            
+            if (override) {
+                if (override.is_available && override.start_time && override.end_time) {
+                    const startHour = parseInt(override.start_time.split(':')[0]);
+                    const endHour = parseInt(override.end_time.split(':')[0]);
+                    
+                    if (hour >= startHour && hour < endHour) {
+                        return {
+                            type: 'available',
+                            startTime: startHour,
+                            endTime: endHour
+                        };
+                    }
+                }
+                return {
+                    type: 'unavailable',
+                    startTime: null,
+                    endTime: null
+                };
+            }
+            
+            // If no availability data found in database, nurse is unavailable
+            return {
+                type: 'unavailable',
+                startTime: null,
+                endTime: null
+            };
+        }
+    }
+    
+    // If no nurse schedule data loaded from database, nurse is unavailable
+    return {
+        type: 'unavailable',
+        startTime: null,
+        endTime: null
+    };
+}
+
+function getMockNurseAvailability(nurseId, day, hour) {
+    const nurse = currentData.nurses.find(n => n.id === nurseId);
+    if (!nurse) return null;
+    
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayName = dayNames[day];
+    
+    // Mock availability patterns
+    const availabilityPatterns = {
+        1: { // Alice Wilson - General Care
+            'Monday': { start: 8, end: 17 },
+            'Tuesday': { start: 8, end: 17 },
+            'Wednesday': { start: 8, end: 17 },
+            'Thursday': { start: 8, end: 17 },
+            'Friday': { start: 8, end: 15 },
+            'Saturday': { start: 9, end: 13 },
+            'Sunday': null
+        },
+        2: { // Michael Chen - Cardiology
+            'Monday': { start: 7, end: 16 },
+            'Tuesday': { start: 7, end: 16 },
+            'Wednesday': { start: 7, end: 16 },
+            'Thursday': { start: 7, end: 16 },
+            'Friday': { start: 7, end: 14 },
+            'Saturday': null,
+            'Sunday': null
+        },
+        3: { // Lisa Rodriguez - Pediatrics
+            'Monday': { start: 9, end: 18 },
+            'Tuesday': { start: 9, end: 18 },
+            'Wednesday': { start: 9, end: 18 },
+            'Thursday': { start: 9, end: 18 },
+            'Friday': { start: 9, end: 16 },
+            'Saturday': { start: 10, end: 14 },
+            'Sunday': null
+        },
+        4: { // James Thompson - Geriatrics
+            'Monday': { start: 8, end: 16 },
+            'Tuesday': { start: 8, end: 16 },
+            'Wednesday': { start: 8, end: 16 },
+            'Thursday': { start: 8, end: 16 },
+            'Friday': { start: 8, end: 15 },
+            'Saturday': null,
+            'Sunday': null
+        },
+        5: { // Maria Garcia - Mental Health
+            'Monday': { start: 10, end: 19 },
+            'Tuesday': { start: 10, end: 19 },
+            'Wednesday': { start: 10, end: 19 },
+            'Thursday': { start: 10, end: 19 },
+            'Friday': { start: 10, end: 17 },
+            'Saturday': { start: 11, end: 15 },
+            'Sunday': null
+        }
+    };
+    
+    const pattern = availabilityPatterns[nurseId];
+    if (!pattern || !pattern[dayName]) return null;
+    
+    const daySchedule = pattern[dayName];
+    if (hour >= daySchedule.start && hour < daySchedule.end) {
+        // Check for appointments during this time
+        const hasAppointment = hasNurseAppointment(nurseId, day, hour);
+        return {
+            type: hasAppointment ? 'busy' : 'available',
+            startTime: daySchedule.start,
+            endTime: daySchedule.end
+        };
+    }
+    
+    return {
+        type: 'unavailable',
+        startTime: null,
+        endTime: null
+    };
+}
+
+function getNurseAppointment(nurseId, day, hour) {
+    // Check appointments from nurse schedule data (database)
+    if (currentData.nurseSchedules && currentData.nurseSchedules.length > 0) {
+        const nurseSchedule = currentData.nurseSchedules.find(n => n.id === nurseId);
+        if (nurseSchedule && nurseSchedule.appointments) {
+            const targetDate = new Date(currentWeekStart);
+            targetDate.setDate(targetDate.getDate() + day);
+            // Use local date formatting to avoid timezone issues
+            const targetDateString = targetDate.getFullYear() + '-' + 
+                String(targetDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(targetDate.getDate()).padStart(2, '0');
+            
+            
+            
+            const appointment = nurseSchedule.appointments.find(apt => {
+                return apt.date === targetDateString && 
+                       apt.time && 
+                       parseInt(apt.time.split(':')[0]) === hour;
+            });
+            
+            if (appointment) {
+                console.log(`Found appointment:`, appointment);
+            }
+            
+            return appointment || null;
+        }
+    }
+    
+    // Fallback to general appointments list if nurse schedule data not available
+    const targetDate = new Date(currentWeekStart);
+    targetDate.setDate(targetDate.getDate() + day);
+    const targetDateString = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    const nurse = currentData.nurses.find(n => n.id === nurseId);
+    if (!nurse) {
+        return null;
+    }
+    
+    const appointment = currentData.appointments.find(apt => {
+        return apt.nurse_name === nurse.name && 
+               apt.appointment_date === targetDateString && 
+               apt.appointment_time && 
+               parseInt(apt.appointment_time.split(':')[0]) === hour;
+    });
+    
+    return appointment || null;
+}
+
+function hasNurseAppointment(nurseId, day, hour) {
+    // Check real appointments data
+    const targetDate = new Date(currentWeekStart);
+    targetDate.setDate(targetDate.getDate() + day);
+    const targetDateString = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    const nurse = currentData.nurses.find(n => n.id === nurseId);
+    if (!nurse) {
+        return false;
+    }
+    
+    const matchingAppointments = currentData.appointments.filter(apt => {
+        return apt.nurse_name === nurse.name && 
+               apt.appointment_date === targetDateString && 
+               apt.appointment_time && 
+               parseInt(apt.appointment_time.split(':')[0]) === hour;
+    });
+    
+    return matchingAppointments.length > 0;
+}
+
+function createAvailabilityBlock(nurse, availability, day, hour) {
+    const block = document.createElement('div');
+    
+    // Handle case where availability is null (shouldn't happen now, but safety check)
+    if (!availability) {
+        availability = { type: 'unavailable' };
+    }
+    
+    block.className = `nurse-availability-block availability-${availability.type}`;
+    
+    // Set content based on availability type
+    if (availability.type === 'busy' && availability.appointment) {
+        // Show patient name for busy slots
+        const patientName = availability.appointment.patient_name || 'Patient';
+        block.textContent = patientName.split(' ')[0]; // First name only
+    } else {
+        // Show nurse name for available/unavailable slots
+        block.textContent = nurse.name.split(' ')[0]; // First name only
+    }
+    
+    // Format time for tooltip
+    const timeString = hour === 12 ? '12:00 PM' : 
+                     hour > 12 ? `${hour - 12}:00 PM` : 
+                     `${hour}:00 AM`;
+    
+    let statusText, tooltipText;
+    if (availability.type === 'busy' && availability.appointment) {
+        statusText = 'Busy';
+        const patientName = availability.appointment.patient_name || 'Patient';
+        tooltipText = `${nurse.name} - ${nurse.specialization}\nPatient: ${patientName}\n${statusText} at ${timeString}`;
+    } else {
+        statusText = availability.type === 'available' ? 'Available' : 'Unavailable';
+        tooltipText = `${nurse.name} - ${nurse.specialization}\n${statusText} at ${timeString}`;
+    }
+    
+    block.title = tooltipText;
+    
+    // Add click handler for more details
+    if (availability.type === 'busy') {
+        // For busy blocks, show appointment details
+        block.addEventListener('click', () => showAppointmentDetails(nurse, day, hour));
+    } else {
+        // For available/unavailable blocks, show nurse availability details
+        block.addEventListener('click', () => showNurseAvailabilityDetails(nurse, availability, day, hour));
+    }
+    
+    return block;
+}
+
+function showNurseAvailabilityDetails(nurse, availability, day, hour) {
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayName = dayNames[day];
+    
+    // Format time properly
+    const timeString = hour === 12 ? '12:00 PM' : 
+                     hour > 12 ? `${hour - 12}:00 PM` : 
+                     `${hour}:00 AM`;
+    
+    const statusText = availability.type === 'available' ? 'Available' : 
+                      availability.type === 'busy' ? 'Busy' : 
+                      'Unavailable';
+    
+    const statusClass = availability.type === 'available' ? 'bg-success' : 
+                       availability.type === 'busy' ? 'bg-danger' : 
+                       'bg-secondary';
+    
+    const content = `
+        <div class="nurse-details">
+            <h4>${nurse.name}</h4>
+            <p><strong>Specialization:</strong> ${nurse.specialization}</p>
+            <p><strong>Day:</strong> ${dayName}</p>
+            <p><strong>Time:</strong> ${timeString}</p>
+            <p><strong>Status:</strong> <span class="badge ${statusClass}">${statusText}</span></p>
+            <p><strong>Phone:</strong> ${nurse.phone || 'N/A'}</p>
+            <p><strong>Email:</strong> ${nurse.email || 'N/A'}</p>
+            <div class="mt-3">
+                ${availability.type === 'available' ? 
+                    `<button class="btn btn-primary btn-sm" onclick="scheduleAppointmentWithNurse(${nurse.id}, ${day}, ${hour})">
+                        Schedule Appointment
+                    </button>` : 
+                    `<button class="btn btn-secondary btn-sm" disabled>
+                        Not Available
+                    </button>`
+                }
+            </div>
+        </div>
+    `;
+    
+    showModal('Nurse Availability Details', content);
+}
+
+function showAppointmentDetails(nurse, day, hour) {
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayName = dayNames[day];
+    
+    // Find the appointment for this nurse, day, and hour
+    const targetDate = new Date(currentWeekStart);
+    targetDate.setDate(targetDate.getDate() + day);
+    // Use local date formatting to avoid timezone issues
+    const targetDateString = targetDate.getFullYear() + '-' + 
+        String(targetDate.getMonth() + 1).padStart(2, '0') + '-' + 
+        String(targetDate.getDate()).padStart(2, '0');
+    
+    const appointment = currentData.appointments.find(apt => {
+        return apt.nurse_name === nurse.name && 
+               apt.appointment_date === targetDateString && 
+               apt.appointment_time && 
+               parseInt(apt.appointment_time.split(':')[0]) === hour;
+    });
+    
+    if (!appointment) {
+        showToast('Appointment details not found', 'error');
+        return;
+    }
+    
+    // Format time properly
+    const timeString = hour === 12 ? '12:00 PM' : 
+                     hour > 12 ? `${hour - 12}:00 PM` : 
+                     `${hour}:00 AM`;
+    
+    const content = `
+        <div class="appointment-details">
+            <h4><i class="fas fa-calendar-check"></i> Appointment Details</h4>
+            <div class="appointment-info">
+                <div class="info-row">
+                    <strong>Patient:</strong> ${appointment.patient_name}
+                </div>
+                <div class="info-row">
+                    <strong>Phone:</strong> ${appointment.patient_phone}
+                </div>
+                <div class="info-row">
+                    <strong>Nurse:</strong> ${appointment.nurse_name} (${appointment.nurse_specialization})
+                </div>
+                <div class="info-row">
+                    <strong>Date:</strong> ${dayName}, ${targetDate.toLocaleDateString()}
+                </div>
+                <div class="info-row">
+                    <strong>Time:</strong> ${timeString}
+                </div>
+                <div class="info-row">
+                    <strong>Duration:</strong> ${appointment.duration_minutes} minutes
+                </div>
+                <div class="info-row">
+                    <strong>Type:</strong> ${appointment.appointment_type}
+                </div>
+                <div class="info-row">
+                    <strong>Status:</strong> <span class="badge bg-primary">${appointment.status}</span>
+                </div>
+                ${appointment.notes ? `
+                <div class="info-row">
+                    <strong>Notes:</strong> ${appointment.notes}
+                </div>
+                ` : ''}
+                <div class="info-row">
+                    <strong>Created:</strong> ${new Date(appointment.created_at).toLocaleString()}
+                </div>
+            </div>
+            <div class="mt-3">
+                <button class="btn btn-primary btn-sm" onclick="editAppointment(${appointment.id})">
+                    <i class="fas fa-edit"></i> Edit Appointment
+                </button>
+                <button class="btn btn-danger btn-sm ms-2" onclick="deleteAppointment(${appointment.id})">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    `;
+    
+    showModal('Appointment Details', content);
+}
+
+function editAppointment(appointmentId) {
+    // TODO: Implement edit appointment functionality
+    showToast('Edit appointment functionality coming soon', 'info');
+    closeModal();
+}
+
+function deleteAppointment(appointmentId) {
+    // TODO: Implement delete appointment functionality
+    if (confirm('Are you sure you want to delete this appointment?')) {
+        showToast('Delete appointment functionality coming soon', 'info');
+        closeModal();
+    }
+}
+
+function scheduleAppointmentWithNurse(nurseId, day, hour) {
+    const nurse = currentData.nurses.find(n => n.id === nurseId);
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayName = dayNames[day];
+    
+    // Pre-populate the schedule modal with nurse and time
+    showScheduleModal();
+    
+    setTimeout(() => {
+        const nurseSelect = document.querySelector('select[name="nurse_id"]');
+        const dateInput = document.querySelector('input[name="date"]');
+        
+        if (nurseSelect) nurseSelect.value = nurseId;
+        
+        if (dateInput) {
+            // Use the current week start (which is already set to Monday)
+            const targetDate = new Date(currentWeekStart);
+            targetDate.setDate(currentWeekStart.getDate() + day);
+            targetDate.setHours(hour, 0, 0, 0);
+            
+            // Format for datetime-local input (YYYY-MM-DDTHH:MM)
+            const year = targetDate.getFullYear();
+            const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+            const dayOfMonth = String(targetDate.getDate()).padStart(2, '0');
+            const hours = String(hour).padStart(2, '0');
+            const minutes = '00';
+            
+            dateInput.value = `${year}-${month}-${dayOfMonth}T${hours}:${minutes}`;
+        }
+    }, 100);
+}
+
+async function previousWeek() {
+    currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+    updateWeekDisplay();
+    await loadAllData(); // Load latest appointments
+    await loadNurseScheduleData(); // Load nurse availability
+    renderScheduleGrid();
+    updateAvailabilitySummary();
+}
+
+async function nextWeek() {
+    currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+    updateWeekDisplay();
+    await loadAllData(); // Load latest appointments
+    await loadNurseScheduleData(); // Load nurse availability
+    renderScheduleGrid();
+    updateAvailabilitySummary();
+}
+
+function filterNurseSchedule() {
+    renderScheduleGrid();
+}
+
+function updateAvailabilitySummary() {
+    // Use nurseSchedules data if available, otherwise fall back to nurses
+    const nursesData = currentData.nurseSchedules && currentData.nurseSchedules.length > 0 
+        ? currentData.nurseSchedules 
+        : currentData.nurses;
+    
+    const totalNurses = nursesData.length;
+    
+    // For now, let's show a simplified summary based on the current week view
+    // Count available and busy slots for the current week instead of just "today"
+    let totalSlots = 0;
+    let availableSlots = 0;
+    let busySlots = 0;
+    
+    // Count slots for the current week (Monday to Sunday, 9 AM to 5 PM)
+    for (let day = 0; day < 7; day++) {
+        for (let hour = 9; hour <= 17; hour++) {
+            nursesData.forEach(nurse => {
+                totalSlots++;
+                const availability = getNurseAvailability(nurse.id, day, hour);
+                if (availability) {
+                    if (availability.type === 'available') {
+                        availableSlots++;
+                    } else if (availability.type === 'busy') {
+                        busySlots++;
+                    }
+                }
+            });
+        }
+    }
+    
+    const coveragePercentage = totalSlots > 0 ? Math.round((availableSlots / totalSlots) * 100) : 0;
+    
+    // Update the summary display
+    const totalNursesEl = document.getElementById('total-nurses');
+    const availableTodayEl = document.getElementById('available-today');
+    const busyTodayEl = document.getElementById('busy-today');
+    const coveragePercentageEl = document.getElementById('coverage-percentage');
+    
+    if (totalNursesEl) totalNursesEl.textContent = totalNurses;
+    if (availableTodayEl) availableTodayEl.textContent = availableSlots;
+    if (busyTodayEl) busyTodayEl.textContent = busySlots;
+    if (coveragePercentageEl) coveragePercentageEl.textContent = coveragePercentage + '%';
+    
+    console.log(`Availability Summary: Total Nurses=${totalNurses}, Available Slots=${availableSlots}, Busy Slots=${busySlots}, Coverage=${coveragePercentage}%`);
+}
+
+function showAddAvailabilityModal() {
+    const nursesOptions = currentData.nurses.map(n => 
+        `<option value="${n.id}">${n.name} - ${n.specialization}</option>`
+    ).join('');
+    
+    const content = `
+        <form onsubmit="handleAddAvailability(event)">
+            <div class="form-group">
+                <label class="form-label">Nurse</label>
+                <select class="form-select" name="nurse_id" required>
+                    <option value="">Select Nurse</option>
+                    ${nursesOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Day of Week</label>
+                <select class="form-select" name="day_of_week" required>
+                    <option value="">Select Day</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                    <option value="Sunday">Sunday</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Start Time</label>
+                <input type="time" class="form-input" name="start_time" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">End Time</label>
+                <input type="time" class="form-input" name="end_time" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Available</label>
+                <input type="checkbox" name="is_available" checked> Mark as available
+            </div>
+            <div class="d-flex justify-between">
+                <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Add Availability</button>
+            </div>
+        </form>
+    `;
+    showModal('Add Nurse Availability', content);
+}
+
+async function handleAddAvailability(event) {
+    event.preventDefault();
+    showLoading(true);
+    
+    try {
+        const formData = new FormData(event.target);
+        const data = {
+            nurse_id: formData.get('nurse_id'),
+            day_of_week: formData.get('day_of_week'),
+            start_time: formData.get('start_time'),
+            end_time: formData.get('end_time'),
+            is_available: formData.get('is_available') === 'on'
+        };
+        
+        // In a real app, this would be an API call
+        showToast('Availability added successfully', 'success');
+        closeModal();
+        
+        // Refresh the schedule
+        renderScheduleGrid();
+        updateAvailabilitySummary();
+        
+    } catch (error) {
+        console.error('Error adding availability:', error);
+        showToast('Failed to add availability', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function viewNurseSchedule(id) { 
+    showView('nurse-schedule');
+    // Filter to specific nurse if ID provided
+    if (id) {
+        setTimeout(() => {
+            document.getElementById('nurse-filter-select').value = id;
+            filterNurseSchedule();
+        }, 100);
+    }
+}

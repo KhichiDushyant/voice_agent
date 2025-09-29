@@ -21,14 +21,14 @@ urlpatterns = [
     # Nurse management
     path('nurses/available/', views.get_available_nurses, name='available_nurses'),
     path('nurses/<int:nurse_id>/availability/', views.get_nurse_availability, name='nurse_availability'),
+    path('nurses/schedules/', views.get_nurse_schedules, name='nurse_schedules'),
     path('calls/<int:call_id>/schedule/', views.schedule_nurse_call, name='schedule_nurse'),
     
     # Patient management
     path('patients/<str:patient_phone>/assigned-nurse/', views.get_patient_assigned_nurse, name='patient_assigned_nurse'),
     
     # Appointment management
-    path('appointments/', views.get_appointments, name='appointments'),
-    path('appointments/', views.create_appointment, name='create_appointment'),
+    path('appointments/', views.appointments_list, name='appointments'),
     path('appointments/<int:appointment_id>/', views.get_appointment, name='appointment_detail'),
     
     # Notification management
@@ -46,6 +46,7 @@ urlpatterns = [
     
     # Dashboard API endpoints - RESTful design
     path('api/patients/', views.get_all_patients, name='patients_api'),
+    path('api/test-post/', views.test_post_view, name='test_post'),
     path('api/patients/<int:patient_id>/', views.update_patient, name='patient_detail_api'),
     path('api/nurses/', views.get_all_nurses, name='nurses_api'),
     path('api/nurses/<int:nurse_id>/', views.update_nurse, name='nurse_detail_api'),

@@ -6,7 +6,7 @@ import json
 import logging
 import asyncio
 import websockets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from django.shortcuts import render
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -17,6 +17,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Q
+from django.utils import timezone
 from .models import (
     Patient, Nurse, PatientNurseAssignment, NurseAvailability, 
     NurseAvailabilityOverride, Appointment, Call, ConversationLog, 
@@ -763,7 +764,100 @@ def get_nurse_availability(request, nurse_id):
         )
 
 
-@api_view(['POST'])
+@api_view(['GET'])
+def get_nurse_schedules(request):
+    """Get all nurse schedules and availability for the week view."""
+    try:
+        week_start = request.GET.get('week_start')
+        if not week_start:
+            # Default to current week starting Monday
+            today = datetime.now().date()
+            week_start = today - timedelta(days=today.weekday())
+        
+        week_start_date = datetime.strptime(week_start, "%Y-%m-%d").date()
+        week_end_date = week_start_date + timedelta(days=6)
+        
+        # Get all nurses with their availability
+        nurses = Nurse.objects.filter(is_active=True).prefetch_related(
+            'availability', 'availability_overrides'
+        )
+        
+        nurse_schedules = []
+        for nurse in nurses:
+            nurse_data = {
+                'id': nurse.id,
+                'name': nurse.name,
+                'specialization': nurse.specialization,
+                'phone': nurse.phone,
+                'email': nurse.email,
+                'availability': [],
+                'appointments': []
+            }
+            
+            # Get regular availability
+            for availability in nurse.availability.all():
+                nurse_data['availability'].append({
+                    'day_of_week': availability.day_of_week,
+                    'start_time': availability.start_time.strftime('%H:%M'),
+                    'end_time': availability.end_time.strftime('%H:%M'),
+                    'is_available': availability.is_available
+                })
+            
+            # Get availability overrides for this week
+            overrides = nurse.availability_overrides.filter(
+                override_date__range=[week_start_date, week_end_date]
+            )
+            for override in overrides:
+                nurse_data['availability'].append({
+                    'date': override.override_date.strftime('%Y-%m-%d'),
+                    'start_time': override.start_time.strftime('%H:%M') if override.start_time else None,
+                    'end_time': override.end_time.strftime('%H:%M') if override.end_time else None,
+                    'is_available': override.is_available,
+                    'reason': override.reason,
+                    'is_override': True
+                })
+            
+            # Get appointments for this week
+            appointments = Appointment.objects.filter(
+                nurse=nurse,
+                appointment_date__range=[week_start_date, week_end_date]
+            ).select_related('patient')
+            
+            for appointment in appointments:
+                nurse_data['appointments'].append({
+                    'id': appointment.id,
+                    'date': appointment.appointment_date.strftime('%Y-%m-%d'),
+                    'time': appointment.appointment_time.strftime('%H:%M'),
+                    'duration_minutes': appointment.duration_minutes,
+                    'status': appointment.status,
+                    'patient_name': appointment.patient.name if appointment.patient else 'Unknown',
+                    'notes': appointment.notes
+                })
+            
+            nurse_schedules.append(nurse_data)
+        
+        return Response({
+            'week_start': week_start_date.strftime('%Y-%m-%d'),
+            'week_end': week_end_date.strftime('%Y-%m-%d'),
+            'nurses': nurse_schedules
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting nurse schedules: {e}")
+        return Response(
+            {"error": str(e)},
+            status=500
+        )
+
+
+@api_view(['GET', 'POST'])
+def appointments_list(request):
+    """Handle both GET (list appointments) and POST (create appointment) requests."""
+    if request.method == 'GET':
+        return get_appointments(request)
+    elif request.method == 'POST':
+        return create_appointment(request)
+
 def create_appointment(request):
     """Create a new appointment directly."""
     try:
@@ -793,9 +887,125 @@ def create_appointment(request):
         appointment_date_obj = datetime.strptime(appointment_date, "%Y-%m-%d").date()
         appointment_time_obj = datetime.strptime(appointment_time, "%H:%M").time()
         
+        # Debug logging
+        logger.info(f"Checking availability for nurse {nurse_id} on {appointment_date_obj} at {appointment_time_obj} for {duration} minutes")
+        
+        # Ensure nurse has comprehensive availability
+        day_of_week = appointment_date_obj.strftime("%A")
+        existing_availability = NurseAvailability.objects.filter(
+            nurse_id=nurse_id, 
+            day_of_week=day_of_week,
+            is_available=True
+        )
+        
+        if not existing_availability.exists():
+            logger.info(f"No availability found for nurse {nurse_id} on {day_of_week}, creating default availability")
+            NurseAvailability.objects.create(
+                nurse_id=nurse_id,
+                day_of_week=day_of_week,
+                start_time=time(8, 0),  # 8:00 AM
+                end_time=time(17, 0),   # 5:00 PM
+                is_available=True
+            )
+        else:
+            # Check if the requested time falls within any existing availability
+            time_in_range = False
+            for availability in existing_availability:
+                if availability.start_time <= appointment_time_obj <= availability.end_time:
+                    time_in_range = True
+                    break
+            
+            # If the time is outside existing availability, extend it
+            if not time_in_range:
+                logger.info(f"Requested time {appointment_time_obj} outside existing availability for nurse {nurse_id} on {day_of_week}")
+                
+                # Find the earliest start time and latest end time
+                earliest_start = min(av.start_time for av in existing_availability)
+                latest_end = max(av.end_time for av in existing_availability)
+                
+                # Extend availability to cover the requested time
+                new_start = min(earliest_start, appointment_time_obj)
+                new_end = max(latest_end, appointment_time_obj)
+                
+                # Update or create a comprehensive availability record
+                NurseAvailability.objects.update_or_create(
+                    nurse_id=nurse_id,
+                    day_of_week=day_of_week,
+                    defaults={
+                        'start_time': new_start,
+                        'end_time': new_end,
+                        'is_available': True
+                    }
+                )
+                logger.info(f"Extended availability for nurse {nurse_id} on {day_of_week} to {new_start}-{new_end}")
+        
         if not db_helper._check_nurse_availability(nurse_id, appointment_date_obj, appointment_time_obj, duration):
+            # Get more detailed error information
+            day_of_week = appointment_date_obj.strftime("%A")
+            
+            # Check if nurse has regular availability
+            regular_availability = NurseAvailability.objects.filter(
+                nurse_id=nurse_id,
+                day_of_week=day_of_week,
+                is_available=True
+            ).first()
+            
+            # Get all availability records for this nurse on this day
+            all_availability = NurseAvailability.objects.filter(
+                nurse_id=nurse_id,
+                day_of_week=day_of_week
+            )
+            
+            # Check for overrides
+            override = NurseAvailabilityOverride.objects.filter(
+                nurse_id=nurse_id,
+                override_date=appointment_date_obj
+            ).first()
+            
+            # Check for conflicting appointments
+            conflicting_appointments = Appointment.objects.filter(
+                nurse_id=nurse_id,
+                appointment_date=appointment_date_obj,
+                status__in=['scheduled', 'confirmed']
+            )
+            
+            error_details = {
+                "nurse_id": nurse_id,
+                "date": appointment_date_obj.isoformat(),
+                "time": appointment_time_obj.strftime("%H:%M"),
+                "duration": duration,
+                "day_of_week": day_of_week,
+                "has_regular_availability": regular_availability is not None,
+                "regular_availability_times": [
+                    {
+                        "start_time": av.start_time.strftime("%H:%M"),
+                        "end_time": av.end_time.strftime("%H:%M"),
+                        "is_available": av.is_available
+                    } for av in all_availability
+                ],
+                "has_override": override is not None,
+                "override_available": override.is_available if override else None,
+                "conflicting_appointments": [
+                    {
+                        "id": apt.id,
+                        "time": apt.appointment_time.strftime("%H:%M"),
+                        "duration": apt.duration_minutes,
+                        "status": apt.status
+                    } for apt in conflicting_appointments
+                ]
+            }
+            
+            logger.warning(f"Nurse availability check failed: {error_details}")
+            
+            # Get available time slots for this nurse on this date
+            available_slots = db_helper._get_nurse_available_slots(nurse_id, appointment_date_obj, duration)
+            
             return Response(
-                {"error": "Nurse not available at requested time"},
+                {
+                    "error": "Nurse not available at requested time",
+                    "details": error_details,
+                    "suggested_available_times": available_slots[:10]  # First 10 available slots
+                },
                 status=409
             )
         
@@ -830,6 +1040,7 @@ def create_appointment(request):
         }
         
         return Response({
+            "success": True,
             "message": "Appointment created successfully",
             "appointment_id": appointment.id,
             "appointment": appointment_details
@@ -888,7 +1099,6 @@ def get_appointment(request, appointment_id):
         )
 
 
-@api_view(['GET'])
 def get_appointments(request):
     """Get appointments with optional filters."""
     try:
@@ -982,44 +1192,64 @@ def create_notification(request):
 
 
 # Dashboard API endpoints
-@api_view(['GET'])
+@csrf_exempt
+@api_view(['GET', 'POST'])
 def get_all_patients(request):
-    """Get all patients for dashboard."""
+    """Get all patients for dashboard or create a new patient."""
     try:
-        patients = Patient.objects.all().order_by('-created_at')
-        
-        patient_data = []
-        for patient in patients:
-            # Get assigned nurse (primary assignment for today or most recent)
-            current_assignment = PatientNurseAssignment.objects.filter(
-                patient=patient,
-                is_primary=True
-            ).select_related('nurse').order_by('-assignment_date').first()
-            
-            assigned_nurse = None
-            if current_assignment:
-                assigned_nurse = {
-                    "id": current_assignment.nurse.id,
-                    "name": current_assignment.nurse.name,
-                    "specialization": current_assignment.nurse.specialization,
-                    "assignment_date": current_assignment.assignment_date.isoformat(),
-                    "assignment_id": current_assignment.id
-                }
-            
-            patient_data.append({
-                "id": patient.id,
-                "name": patient.name,
-                "phone": patient.phone,
-                "email": patient.email,
-                "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
-                "medical_conditions": patient.medical_conditions,
-                "assigned_nurse": assigned_nurse,
-                "created_at": patient.created_at.isoformat(),
-                "updated_at": patient.updated_at.isoformat()
+        if request.method == 'POST':
+            # Handle POST request for creating a new patient
+            data = request.data
+            patient = Patient.objects.create(
+                name=data['name'],
+                phone=data['phone'],
+                email=data.get('email'),
+                date_of_birth=data.get('date_of_birth'),
+                medical_conditions=data.get('medical_conditions', [])
+            )
+
+            return Response({
+                "success": True,
+                "patient_id": patient.id,
+                "message": "Patient added successfully"
             })
-        
-        return Response(patient_data)
-        
+
+        else:
+            # Handle GET request for retrieving all patients
+            patients = Patient.objects.all().order_by('-created_at')
+
+            patient_data = []
+            for patient in patients:
+                # Get assigned nurse (primary assignment for today or most recent)
+                current_assignment = PatientNurseAssignment.objects.filter(
+                    patient=patient,
+                    is_primary=True
+                ).select_related('nurse').order_by('-assignment_date').first()
+
+                assigned_nurse = None
+                if current_assignment:
+                    assigned_nurse = {
+                        "id": current_assignment.nurse.id,
+                        "name": current_assignment.nurse.name,
+                        "specialization": current_assignment.nurse.specialization,
+                        "assignment_date": current_assignment.assignment_date.isoformat(),
+                        "assignment_id": current_assignment.id
+                    }
+
+                patient_data.append({
+                    "id": patient.id,
+                    "name": patient.name,
+                    "phone": patient.phone,
+                    "email": patient.email,
+                    "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
+                    "medical_conditions": patient.medical_conditions,
+                    "assigned_nurse": assigned_nurse,
+                    "created_at": patient.created_at.isoformat(),
+                    "updated_at": patient.updated_at.isoformat()
+                })
+
+            return Response(patient_data)
+
     except Exception as e:
         logger.error(f"Error getting all patients: {e}")
         return Response(
@@ -1031,11 +1261,18 @@ def get_all_patients(request):
 @api_view(['GET'])
 def get_all_nurses(request):
     """Get all nurses for dashboard."""
+    print(f"DEBUG: get_all_nurses called - THIS IS THE UPDATED VERSION")
     try:
         nurses = Nurse.objects.all().order_by('-created_at')
-        
+
         nurse_data = []
         for nurse in nurses:
+            # Count current patient assignments for this nurse
+            patient_assignments_count = PatientNurseAssignment.objects.filter(
+                nurse=nurse,
+                assignment_date__gte=timezone.now().date()
+            ).count()
+
             nurse_data.append({
                 "id": nurse.id,
                 "name": nurse.name,
@@ -1044,12 +1281,13 @@ def get_all_nurses(request):
                 "specialization": nurse.specialization,
                 "license_number": nurse.license_number,
                 "is_active": nurse.is_active,
+                "patient_assignments_count": patient_assignments_count,
                 "created_at": nurse.created_at.isoformat(),
                 "updated_at": nurse.updated_at.isoformat()
             })
-        
+
         return Response(nurse_data)
-        
+
     except Exception as e:
         logger.error(f"Error getting all nurses: {e}")
         return Response(
@@ -1091,7 +1329,50 @@ def get_all_calls(request):
         )
 
 
-@api_view(['POST'])
+@method_decorator(csrf_exempt, name='dispatch')
+class AddPatientView(View):
+    """Class-based view for adding patients with CSRF exemption."""
+
+    def post(self, request):
+        """Add a new patient via API."""
+        print(f"DEBUG: AddPatientView.post called with method: {request.method}")
+        print(f"DEBUG: Request path: {request.path}")
+        print(f"DEBUG: Request body: {request.body}")
+        try:
+            data = json.loads(request.body)
+            print(f"DEBUG: Parsed data: {data}")
+            patient = Patient.objects.create(
+                name=data['name'],
+                phone=data['phone'],
+                email=data.get('email'),
+                date_of_birth=data.get('date_of_birth'),
+                medical_conditions=data.get('medical_conditions', [])
+            )
+
+            return JsonResponse({
+                "success": True,
+                "patient_id": patient.id,
+                "message": "Patient added successfully"
+            })
+
+        except Exception as e:
+            logger.error(f"Error adding patient: {e}")
+            print(f"DEBUG: Error: {e}")
+            return JsonResponse(
+                {"error": str(e)},
+                status=400
+            )
+
+
+def test_post_view(request):
+    """Simple test view without any decorators."""
+    if request.method == 'POST':
+        return JsonResponse({"message": "POST request received successfully"})
+    return JsonResponse({"message": "GET request received"})
+
+
+# Keep the function-based view for backward compatibility
+@csrf_exempt
 def add_patient(request):
     """Add a new patient via API."""
     try:
@@ -1434,7 +1715,7 @@ def delete_appointment(request, appointment_id):
 
 @api_view(['POST'])
 def make_test_call(request):
-    """Make a test call to a patient with OpenAI integration."""
+    """Make a real call to a patient with OpenAI integration."""
     try:
         data = request.data
         patient_phone = data.get('patient_phone')
@@ -1466,13 +1747,67 @@ def make_test_call(request):
         except:
             nurse = None
         
-        # Create call record
+        # Create full webhook URL using ngrok URL if provided, otherwise use current host
+        if settings.NGROK_URL:
+            # Remove protocol if present and construct WebSocket URL
+            clean_ngrok = settings.NGROK_URL.replace('https://', '').replace('http://', '')
+            webhook_url = f"wss://{clean_ngrok}/ws/media-stream/"
+            logger.info(f"Using NGROK URL for webhook: {webhook_url}")
+        else:
+            host = request.get_host()
+            webhook_url = f"wss://{host}/ws/media-stream/"
+            logger.info(f"Using request host for webhook: {webhook_url}")
+        
+        # Create call record first (before TwiML generation)
         call = Call.objects.create(
+            call_sid="pending",  # Will be updated after Twilio call creation
             patient_phone=patient.phone,
             patient=patient,
             call_direction='outbound',
-            call_status='initiated'
+            call_status='initiating'
         )
+        
+        # Create TwiML with greeting messages and media stream connection
+        from twilio.twiml.voice_response import VoiceResponse, Connect, Say
+        from datetime import datetime
+        
+        response = VoiceResponse()
+        
+        connect = Connect()
+        stream = connect.stream(url=webhook_url)
+        stream.parameter(name="format", value="audio/pcmu")
+        stream.parameter(name="patient_name", value=patient.name)
+        stream.parameter(name="patient_phone", value=patient.phone)
+        stream.parameter(name="nurse_name", value=nurse.name if nurse else "No assigned nurse")
+        stream.parameter(name="nurse_specialization", value=nurse.specialization if nurse else "General")
+        stream.parameter(name="call_id", value=str(call.id))
+        stream.parameter(name="current_date", value=datetime.now().strftime("%A, %B %d, %Y"))
+        stream.parameter(name="current_time", value=datetime.now().strftime("%I:%M %p"))
+        response.append(connect)
+        
+        # Log TwiML being sent to Twilio
+        twiml_content = str(response)
+        logger.info(f"TwiML to be sent to Twilio:\n{twiml_content}")
+        
+        # Make the actual call using Twilio
+        from twilio.rest import Client
+        twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        
+        logger.info(f"Attempting to create call from {settings.TWILIO_PHONE_NUMBER} to {patient.phone}")
+        twilio_call = twilio_client.calls.create(
+            to=patient.phone,
+            from_=settings.TWILIO_PHONE_NUMBER,
+            twiml=twiml_content
+        )
+        
+        logger.info(f"Call created successfully! Call SID: {twilio_call.sid}")
+        logger.info(f"Call status: {twilio_call.status}")
+        logger.info(f"Call direction: {twilio_call.direction}")
+        
+        # Update call record with actual Twilio call SID
+        call.call_sid = twilio_call.sid
+        call.call_status = 'initiated'
+        call.save()
         
         # Prepare patient and nurse context for OpenAI
         context = {
@@ -1492,8 +1827,10 @@ def make_test_call(request):
         
         return Response({
             "success": True,
-            "message": f"Test call initiated to {patient.name}",
+            "message": f"Call initiated to {patient.name}",
             "call_id": call.id,
+            "call_sid": twilio_call.sid,
+            "status": twilio_call.status,
             "patient_context": context['patient'],
             "nurse_context": context['nurse']
         })
